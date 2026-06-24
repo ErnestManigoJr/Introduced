@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
 import { Colors, Theme } from '../../src/constants/colors';
 
-export default function ProfileLayout() {
+export default function SettingsLayout() {
   return (
     <Stack
       screenOptions={{
@@ -13,9 +13,9 @@ export default function ProfileLayout() {
         contentStyle: { backgroundColor: Theme.background },
       }}
     >
-      <Stack.Screen name="edit" options={{ title: 'Edit Profile' }} />
-      <Stack.Screen name="connector-setup" options={{ title: 'Connector Profile' }} />
-      <Stack.Screen name="connection-style" options={{ title: 'Connection Style' }} />
+      <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
+      <Stack.Screen name="privacy" options={{ title: 'Privacy' }} />
+      <Stack.Screen name="help" options={{ title: 'Help & Feedback' }} />
     </Stack>
   );
 }
