@@ -94,11 +94,16 @@ export default function IntroduceScreen() {
             {appUser?.introductions_made ?? 0} / 2 introductions made
           </Text>
         </View>
-        {connectionStyleComplete && (
-          <Pressable style={styles.newIntroBtn} onPress={() => router.push('/introduce/suggest')}>
-            <Text style={styles.newIntroBtnText}>+ Introduce</Text>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.leaderboardBtn} onPress={() => router.push('/connector/leaderboard')}>
+            <Text style={styles.leaderboardBtnText}>✦</Text>
           </Pressable>
-        )}
+          {connectionStyleComplete && (
+            <Pressable style={styles.newIntroBtn} onPress={() => router.push('/introduce/suggest')}>
+              <Text style={styles.newIntroBtnText}>+ Introduce</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {/* Connection Style prompt */}
@@ -223,6 +228,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  leaderboardBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: Colors.plum[800],
+    borderWidth: 1, borderColor: Colors.plum[600],
+    alignItems: 'center', justifyContent: 'center',
+  },
+  leaderboardBtnText: { fontSize: 16, color: Colors.champagne[400] },
   newIntroBtn: {
     backgroundColor: Colors.blush[500],
     borderRadius: 20,
