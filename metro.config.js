@@ -3,4 +3,7 @@ const { withNativeWind } = require('nativewind/metro');
 
 const config = getDefaultConfig(__dirname);
 
+// Fix for web bundling with NativeWind
+config.resolver.sourceExts = [...config.resolver.sourceExts, 'mjs', 'cjs'];
+
 module.exports = withNativeWind(config, { input: './global.css' });
