@@ -17,8 +17,11 @@ export interface AppUser {
   account_status: 'active' | 'suspended' | 'deleted' | 'pending';
   onboarding_status: 'incomplete' | 'complete';
   connection_style_complete: boolean;
+  connection_style: string | null;
+  bio: string | null;
   introductions_made: number;
   introductions_received: number;
+  connections_count: number;
   open_to_introductions: boolean;
   created_at: string;
   updated_at: string;

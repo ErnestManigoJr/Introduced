@@ -88,10 +88,17 @@ export default function IntroduceScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Introduce</Text>
-        <Text style={styles.headerSub}>
-          {appUser?.introductions_made ?? 0} / 2 introductions made
-        </Text>
+        <View>
+          <Text style={styles.headerTitle}>Introduce</Text>
+          <Text style={styles.headerSub}>
+            {appUser?.introductions_made ?? 0} / 2 introductions made
+          </Text>
+        </View>
+        {connectionStyleComplete && (
+          <Pressable style={styles.newIntroBtn} onPress={() => router.push('/introduce/suggest')}>
+            <Text style={styles.newIntroBtnText}>+ Introduce</Text>
+          </Pressable>
+        )}
       </View>
 
       {/* Connection Style prompt */}
@@ -212,7 +219,17 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.plum[800],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
+  newIntroBtn: {
+    backgroundColor: Colors.blush[500],
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  newIntroBtnText: { color: Colors.ivory, fontWeight: '600', fontSize: 13 },
   headerTitle: { fontSize: 22, fontWeight: '700', color: Colors.ivory },
   headerSub: { fontSize: 13, color: Colors.plum[400], marginTop: 2 },
   csBanner: {
