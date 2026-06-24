@@ -135,6 +135,25 @@ create table if not exists user_interests (
 );
 
 -- ============================================================
+-- communities (defined before posts for FK)
+-- ============================================================
+create table if not exists communities (
+  id                  uuid primary key default uuid_generate_v4(),
+  name                text not null,
+  description         text,
+  cover_url           text,
+  created_by          uuid not null references app_users(id),
+  community_type      text not null default 'public' check (community_type in ('public','private')),
+  is_live             boolean not null default false,
+  livekit_room_name   text,
+  member_count        integer not null default 0,
+  tags                text[] not null default '{}',
+  created_at          timestamptz not null default now()
+);
+
+create index if not exists communities_tags_idx on communities using gin(tags);
+
+-- ============================================================
 -- posts
 -- ============================================================
 create table if not exists posts (
@@ -157,25 +176,6 @@ create table if not exists posts (
 create index if not exists posts_author_idx on posts(author_id);
 create index if not exists posts_created_idx on posts(created_at desc);
 create index if not exists posts_tags_idx on posts using gin(tags);
-
--- ============================================================
--- communities (must come before posts for FK)
--- ============================================================
-create table if not exists communities (
-  id                  uuid primary key default uuid_generate_v4(),
-  name                text not null,
-  description         text,
-  cover_url           text,
-  created_by          uuid not null references app_users(id),
-  community_type      text not null default 'public' check (community_type in ('public','private')),
-  is_live             boolean not null default false,
-  livekit_room_name   text,
-  member_count        integer not null default 0,
-  tags                text[] not null default '{}',
-  created_at          timestamptz not null default now()
-);
-
-create index if not exists communities_tags_idx on communities using gin(tags);
 
 -- ============================================================
 -- community_members
