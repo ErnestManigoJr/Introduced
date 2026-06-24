@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "Introduced",
+    "slug": "introduced",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "introduced",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.introduced.app",
+      "usesAppleSignIn": true
+    },
+    "android": {
+      "package": "com.introduced.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2D1B35"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Introduced needs access to your photos to set your profile picture and share posts.",
+          "cameraPermission": "Introduced needs access to your camera for profile photos and posts."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Introduced to access your photos.",
+          "savePhotosPermission": "Allow Introduced to save photos.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      "expo-video",
+      "expo-av"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

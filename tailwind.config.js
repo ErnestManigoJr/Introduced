@@ -1,0 +1,62 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './app/**/*.{js,jsx,ts,tsx}',
+    './src/**/*.{js,jsx,ts,tsx}',
+  ],
+  presets: [require('nativewind/preset')],
+  theme: {
+    extend: {
+      colors: {
+        plum: {
+          50:  '#f5f0f7',
+          100: '#ede0f1',
+          200: '#d9bfe3',
+          300: '#c49fd5',
+          400: '#ae7ec6',
+          500: '#9960b8',
+          600: '#7d4a9a',
+          700: '#62397a',
+          800: '#4a2a5c',
+          900: '#2D1B35',
+          950: '#1a0f20',
+        },
+        blush: {
+          50:  '#fdf4f6',
+          100: '#fce8ee',
+          200: '#f9d0dd',
+          300: '#f4a8bf',
+          400: '#ed7a9c',
+          500: '#e2507a',
+          600: '#cc2f5c',
+          700: '#a82249',
+          800: '#8c1f3e',
+          900: '#761e38',
+        },
+        champagne: {
+          50:  '#fdfaf4',
+          100: '#faf4e6',
+          200: '#f5e7ca',
+          300: '#edd5a0',
+          400: '#e3be74',
+          500: '#d9a84e',
+          600: '#c48f38',
+          700: '#a3722e',
+          800: '#855b2a',
+          900: '#6d4b25',
+        },
+        rosegold: {
+          100: '#fde8e8',
+          200: '#f8c4c4',
+          300: '#f09898',
+          400: '#e57171',
+          500: '#c9575a',
+          600: '#a83d40',
+        },
+        ivory: '#FAF7F2',
+        'warm-white': '#FEF9F5',
+      },
+    },
+  },
+  plugins: [],
+};
