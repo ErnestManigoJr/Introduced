@@ -12,7 +12,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
@@ -166,7 +166,11 @@ export default function CommunityScreen() {
             <Text style={styles.emptyBody}>Be the first to start a conversation.</Text>
           </View>
         }
-        renderItem={({ item }) => <ForumPost post={item} />}
+        renderItem={({ item }) => (
+          <Pressable onPress={() => router.push(`/community/post/${item.id}`)}>
+            <ForumPost post={item} />
+          </Pressable>
+        )}
       />
 
       {isMember && (

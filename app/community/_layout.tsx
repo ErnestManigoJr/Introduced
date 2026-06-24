@@ -15,6 +15,7 @@ export default function CommunityLayout() {
     >
       <Stack.Screen name="[id]" options={{ title: 'Community' }} />
       <Stack.Screen name="create" options={{ title: 'Create Community' }} />
+      <Stack.Screen name="post/[id]" options={{ title: 'Post' }} />
     </Stack>
   );
 }

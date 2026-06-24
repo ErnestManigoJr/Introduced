@@ -8,12 +8,20 @@ import {
   SafeAreaView,
   Platform,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
 import { useAuthStore } from '../../src/store/authStore';
 import { supabase } from '../../src/lib/supabase';
 import { Button } from '../../src/components/ui/Button';
+
+interface SuggestedPair {
+  personA: { id: string; display_name: string; username: string };
+  personB: { id: string; display_name: string; username: string };
+  score: number;
+  reason: string;
+}
 
 interface Introduction {
   id: string;
@@ -50,11 +58,25 @@ export default function IntroduceScreen() {
   const [intros, setIntros] = useState<Introduction[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'received' | 'sent'>('received');
+  const [suggestions, setSuggestions] = useState<SuggestedPair[]>([]);
 
   useEffect(() => {
     if (!appUser?.id) return;
     fetchIntros();
-  }, [appUser?.id]);
+    if (connectionStyleComplete) fetchSuggestions();
+  }, [appUser?.id, connectionStyleComplete]);
+
+  async function fetchSuggestions() {
+    if (!appUser?.id) return;
+    try {
+      const { data, error } = await supabase.functions.invoke('suggest-introductions', {
+        body: { connectorId: appUser.id, limit: 5 },
+      });
+      if (!error && data?.pairs?.length) setSuggestions(data.pairs);
+    } catch {
+      // non-critical — silently skip
+    }
+  }
 
   async function fetchIntros() {
     if (!appUser?.id) return;
@@ -133,6 +155,47 @@ export default function IntroduceScreen() {
               />
             ))}
           </View>
+        </View>
+      )}
+
+      {/* Suggested pairs */}
+      {connectionStyleComplete && suggestions.length > 0 && (
+        <View style={styles.suggestionsSection}>
+          <Text style={styles.suggestionsTitle}>Suggested Introductions</Text>
+          <FlatList
+            data={suggestions}
+            keyExtractor={(_, i) => String(i)}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.suggestionsList}
+            renderItem={({ item }) => (
+              <Pressable
+                style={styles.suggestionCard}
+                onPress={() =>
+                  router.push(
+                    `/introduce/compose?personAId=${item.personA.id}&personAName=${encodeURIComponent(item.personA.display_name)}&personBId=${item.personB.id}&personBName=${encodeURIComponent(item.personB.display_name)}`
+                  )
+                }
+              >
+                <View style={styles.suggestionAvatars}>
+                  <View style={styles.suggestionAvatar}>
+                    <Text style={styles.suggestionInitial}>{item.personA.display_name[0]}</Text>
+                  </View>
+                  <Text style={styles.suggestionDiamond}>✦</Text>
+                  <View style={styles.suggestionAvatar}>
+                    <Text style={styles.suggestionInitial}>{item.personB.display_name[0]}</Text>
+                  </View>
+                </View>
+                <Text style={styles.suggestionNames} numberOfLines={1}>
+                  {item.personA.display_name} & {item.personB.display_name}
+                </Text>
+                <Text style={styles.suggestionReason} numberOfLines={2}>{item.reason}</Text>
+                <View style={styles.suggestionScore}>
+                  <Text style={styles.suggestionScoreText}>{item.score}% match</Text>
+                </View>
+              </Pressable>
+            )}
+          />
         </View>
       )}
 
@@ -324,6 +387,50 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   statusText: { fontSize: 12, fontWeight: '600' },
+  suggestionsSection: { paddingTop: 12 },
+  suggestionsTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.plum[400],
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginLeft: 16,
+    marginBottom: 8,
+  },
+  suggestionsList: { paddingHorizontal: 16, gap: 10 },
+  suggestionCard: {
+    width: 160,
+    backgroundColor: Colors.plum[800],
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.plum[700],
+    padding: 12,
+    gap: 6,
+  },
+  suggestionAvatars: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  suggestionAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.plum[700],
+    borderWidth: 1.5,
+    borderColor: Colors.blush[500],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestionInitial: { fontSize: 13, fontWeight: '700', color: Colors.blush[400] },
+  suggestionDiamond: { fontSize: 12, color: Colors.champagne[400] },
+  suggestionNames: { fontSize: 13, fontWeight: '600', color: Colors.ivory },
+  suggestionReason: { fontSize: 11, color: Colors.plum[400], lineHeight: 16 },
+  suggestionScore: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.plum[700],
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 2,
+  },
+  suggestionScoreText: { fontSize: 11, color: Colors.champagne[400], fontWeight: '600' },
   empty: { alignItems: 'center', paddingTop: 60, gap: 12, paddingHorizontal: 32 },
   emptyIcon: { fontSize: 40, color: Colors.plum[600] },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.ivory, textAlign: 'center' },
