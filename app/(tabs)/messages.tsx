@@ -15,55 +15,68 @@ import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
 
-interface Conversation {
+interface Thread {
   id: string;
-  updated_at: string;
-  last_message: string | null;
-  unread_count: number;
-  other_user: { id: string; display_name: string; username: string } | null;
+  participant_ids: string[];
+  last_message_at: string | null;
+  created_at: string;
+  last_message_body?: string | null;
+  other_user?: { id: string; display_name: string; username: string } | null;
 }
 
 export default function MessagesScreen() {
   const { appUser } = useAuthStore();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [threads, setThreads] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  async function fetchConversations() {
+  async function fetchThreads() {
     if (!appUser?.id) return;
 
-    const { data, error } = await supabase
-      .from('conversations')
-      .select(`
-        id, updated_at, last_message, unread_count,
-        participant_a:app_users!participant_a_id(id, display_name, username),
-        participant_b:app_users!participant_b_id(id, display_name, username)
-      `)
-      .or(`participant_a_id.eq.${appUser.id},participant_b_id.eq.${appUser.id}`)
-      .order('updated_at', { ascending: false });
+    // Fetch threads the current user is part of
+    const { data: threadData, error } = await supabase
+      .from('direct_threads')
+      .select('id, participant_ids, last_message_at, created_at')
+      .contains('participant_ids', [appUser.id])
+      .order('last_message_at', { ascending: false, nullsFirst: false });
 
-    if (!error && data) {
-      const mapped = data.map((c: any) => {
-        const isA = c.participant_a?.id === appUser.id;
-        return {
-          id: c.id,
-          updated_at: c.updated_at,
-          last_message: c.last_message,
-          unread_count: c.unread_count ?? 0,
-          other_user: isA ? c.participant_b : c.participant_a,
-        };
-      });
-      setConversations(mapped);
-    }
+    if (error || !threadData) return;
+
+    // Fetch the other participant's profile for each thread
+    const enriched = await Promise.all(
+      threadData.map(async (thread) => {
+        const otherId = thread.participant_ids.find((id: string) => id !== appUser.id);
+        if (!otherId) return { ...thread, other_user: null };
+
+        const { data: user } = await supabase
+          .from('app_users')
+          .select('id, display_name, username')
+          .eq('id', otherId)
+          .single();
+
+        // Get last message
+        const { data: lastMsg } = await supabase
+          .from('direct_messages')
+          .select('body')
+          .eq('thread_id', thread.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        return { ...thread, other_user: user ?? null, last_message_body: lastMsg?.body ?? null };
+      })
+    );
+
+    setThreads(enriched);
   }
 
   useEffect(() => {
-    fetchConversations().finally(() => setLoading(false));
+    fetchThreads().finally(() => setLoading(false));
   }, [appUser?.id]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchConversations();
+    await fetchThreads();
     setRefreshing(false);
   }, [appUser?.id]);
 
@@ -82,26 +95,25 @@ export default function MessagesScreen() {
       </View>
 
       <FlatList
-        data={conversations}
+        data={threads}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.blush[500]} />}
         contentContainerStyle={styles.list}
         ListEmptyComponent={<EmptyState />}
-        renderItem={({ item }) => <ConversationRow conversation={item} />}
+        renderItem={({ item }) => <ThreadRow thread={item} />}
       />
     </SafeAreaView>
   );
 }
 
-function ConversationRow({ conversation }: { conversation: Conversation }) {
-  const other = conversation.other_user as any;
-  const timeAgo = getTimeAgo(conversation.updated_at);
-  const hasUnread = conversation.unread_count > 0;
+function ThreadRow({ thread }: { thread: Thread }) {
+  const other = thread.other_user;
+  const timeAgo = thread.last_message_at ? getTimeAgo(thread.last_message_at) : '';
 
   return (
     <Pressable
       style={styles.row}
-      onPress={() => router.push(`/conversation/${conversation.id}`)}
+      onPress={() => router.push(`/conversation/${thread.id}`)}
     >
       <View style={styles.avatar}>
         <Text style={styles.avatarText}>
@@ -110,24 +122,12 @@ function ConversationRow({ conversation }: { conversation: Conversation }) {
       </View>
       <View style={styles.rowContent}>
         <View style={styles.rowTop}>
-          <Text style={[styles.nameText, hasUnread && styles.nameUnread]}>
-            {other?.display_name ?? 'Unknown'}
-          </Text>
-          <Text style={styles.timeText}>{timeAgo}</Text>
+          <Text style={styles.nameText}>{other?.display_name ?? 'Unknown'}</Text>
+          {timeAgo ? <Text style={styles.timeText}>{timeAgo}</Text> : null}
         </View>
-        <View style={styles.rowBottom}>
-          <Text
-            style={[styles.previewText, hasUnread && styles.previewUnread]}
-            numberOfLines={1}
-          >
-            {conversation.last_message ?? 'No messages yet'}
-          </Text>
-          {hasUnread && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{conversation.unread_count}</Text>
-            </View>
-          )}
-        </View>
+        <Text style={styles.previewText} numberOfLines={1}>
+          {thread.last_message_body ?? 'No messages yet'}
+        </Text>
       </View>
     </Pressable>
   );
@@ -179,35 +179,17 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 48, height: 48, borderRadius: 24,
     backgroundColor: Colors.plum[700],
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: Colors.blush[500],
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: Colors.blush[500],
   },
   avatarText: { fontSize: 18, fontWeight: '700', color: Colors.blush[400] },
   rowContent: { flex: 1 },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 },
-  nameText: { fontSize: 15, fontWeight: '500', color: Colors.plum[300] },
-  nameUnread: { fontWeight: '700', color: Colors.ivory },
+  nameText: { fontSize: 15, fontWeight: '600', color: Colors.ivory },
   timeText: { fontSize: 12, color: Colors.plum[500] },
-  rowBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  previewText: { fontSize: 14, color: Colors.plum[400], flex: 1 },
-  previewUnread: { color: Colors.plum[200] },
-  badge: {
-    backgroundColor: Colors.blush[500],
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 5,
-    marginLeft: 8,
-  },
-  badgeText: { color: Colors.ivory, fontSize: 11, fontWeight: '700' },
+  previewText: { fontSize: 14, color: Colors.plum[400] },
   empty: { alignItems: 'center', paddingTop: 80, gap: 12, paddingHorizontal: 32 },
   emptyIcon: { fontSize: 40, color: Colors.plum[600] },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.ivory },

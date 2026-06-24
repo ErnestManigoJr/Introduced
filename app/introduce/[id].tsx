@@ -117,13 +117,21 @@ export default function IntroDetailScreen() {
       return;
     }
 
-    // If both accepted, create a conversation
+    // If both accepted, create a direct thread
     if (newStatus === 'both_accepted') {
-      await supabase.from('conversations').insert({
-        participant_a_id: intro.person_a_id,
-        participant_b_id: intro.person_b_id,
-        introduction_id: intro.id,
-      });
+      const { data: thread } = await supabase
+        .from('direct_threads')
+        .insert({ participant_ids: [intro.person_a_id, intro.person_b_id] })
+        .select('id')
+        .single();
+
+      if (thread) {
+        // Store thread ID on the introduction for navigation
+        await supabase
+          .from('introductions')
+          .update({ intro_room_id: thread.id })
+          .eq('id', intro.id);
+      }
     }
 
     await fetchIntro();
@@ -246,10 +254,10 @@ export default function IntroDetailScreen() {
       )}
 
       {/* Both accepted — go to conversation */}
-      {intro.status === 'both_accepted' && !isConnector && (
+      {intro.status === 'both_accepted' && !isConnector && intro.intro_room_id && (
         <Pressable
           style={styles.messageBtn}
-          onPress={() => router.push(`/conversation/${intro.id}`)}
+          onPress={() => router.push(`/conversation/${intro.intro_room_id}`)}
         >
           <Text style={styles.messageBtnText}>Open Conversation →</Text>
         </Pressable>
