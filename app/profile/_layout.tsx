@@ -16,6 +16,7 @@ export default function ProfileLayout() {
       <Stack.Screen name="edit" options={{ title: 'Edit Profile' }} />
       <Stack.Screen name="connector-setup" options={{ title: 'Connector Profile' }} />
       <Stack.Screen name="connection-style" options={{ title: 'Connection Style' }} />
+      <Stack.Screen name="dating-preferences" options={{ title: 'Connection Preferences' }} />
     </Stack>
   );
 }

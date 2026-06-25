@@ -196,6 +196,15 @@ export default function EditProfileScreen() {
           </View>
         </Field>
 
+        {/* Dating preferences link */}
+        <Pressable style={styles.connectorLink} onPress={() => router.push('/profile/dating-preferences')}>
+          <View>
+            <Text style={styles.connectorLinkTitle}>◈ Connection Preferences</Text>
+            <Text style={styles.connectorLinkSub}>What you're open to, pace, and non-negotiables</Text>
+          </View>
+          <Text style={styles.connectorLinkArrow}>→</Text>
+        </Pressable>
+
         {/* Connector profile link */}
         <Pressable style={styles.connectorLink} onPress={() => router.push('/profile/connector-setup')}>
           <View>

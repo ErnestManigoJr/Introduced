@@ -77,7 +77,7 @@ export default function PrivacyPreferencesScreen() {
   const [locationPref, setLocationPref] = useState<LocationOption>('City');
 
   function handleContinue() {
-    router.push('/onboarding/introduction-opt-in');
+    router.push('/onboarding/dating-preferences');
   }
 
   return (

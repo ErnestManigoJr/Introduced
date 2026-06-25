@@ -59,6 +59,7 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding/create-identity" />
         <Stack.Screen name="onboarding/profile-setup" />
         <Stack.Screen name="onboarding/privacy-preferences" />
+        <Stack.Screen name="onboarding/dating-preferences" />
         <Stack.Screen name="onboarding/introduction-opt-in" />
         <Stack.Screen name="onboarding/connection-style" />
         <Stack.Screen name="(tabs)" />
