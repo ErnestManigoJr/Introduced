@@ -134,22 +134,136 @@ export function computeCommunitySignal(
   return Math.round((shared / union) * 100);
 }
 
+// ---------------------------------------------------------------------------
+// Dating preference compatibility signal (0-100)
+// Checks intention alignment, pace compatibility, non-negotiable overlap
+// ---------------------------------------------------------------------------
+
+export interface DatingPrefs {
+  open_to: string;
+  relationship_pace: string | null;
+  non_negotiables: string[];
+  intro_open_status: string;
+}
+
+export function computeDatePreferenceSignal(
+  prefsA: DatingPrefs | null,
+  prefsB: DatingPrefs | null
+): { score: number; notes: string[] } {
+  if (!prefsA || !prefsB) return { score: 50, notes: [] };
+
+  let score = 0;
+  const notes: string[] = [];
+
+  // Openness alignment (40 pts) — both need to be compatible in what they're open to
+  const openCompat = intentionCompatible(prefsA.open_to, prefsB.open_to);
+  score += openCompat * 40;
+  if (openCompat >= 0.8) notes.push('open to the same kind of connection');
+  else if (openCompat <= 0.3) notes.push('different intentions — worth noting');
+
+  // Pace compatibility (30 pts)
+  const paceScore = paceCompatible(prefsA.relationship_pace, prefsB.relationship_pace);
+  score += paceScore * 30;
+  if (paceScore >= 0.8) notes.push('compatible relationship pace');
+
+  // Non-negotiable overlap (30 pts)
+  const nnScore = overlapScore(prefsA.non_negotiables, prefsB.non_negotiables);
+  score += nnScore * 30;
+  if (nnScore >= 0.5) notes.push('shared values and non-negotiables');
+
+  return { score: Math.round(Math.min(100, score)), notes };
+}
+
+function intentionCompatible(a: string, b: string): number {
+  if (a === b) return 1;
+  if (a === 'both' || b === 'both') return 0.8;
+  if ((a === 'friendship' && b === 'dating') || (a === 'dating' && b === 'friendship')) return 0.2;
+  if (a === 'not_sure' || b === 'not_sure') return 0.5;
+  if (a === 'relationship' && b === 'dating') return 0.6;
+  if (a === 'dating' && b === 'relationship') return 0.6;
+  return 0.4;
+}
+
+function paceCompatible(a: string | null, b: string | null): number {
+  if (!a || !b) return 0.5;
+  if (a === b) return 1;
+  const matrix: Record<string, Record<string, number>> = {
+    slow:    { slow: 1, natural: 0.7, steady: 0.5, direct: 0.2 },
+    natural: { slow: 0.7, natural: 1, steady: 0.7, direct: 0.5 },
+    steady:  { slow: 0.5, natural: 0.7, steady: 1, direct: 0.6 },
+    direct:  { slow: 0.2, natural: 0.5, steady: 0.6, direct: 1 },
+  };
+  return matrix[a]?.[b] ?? 0.5;
+}
+
+function overlapScore(a: string[], b: string[]): number {
+  if (!a.length || !b.length) return 0;
+  const setA = new Set(a);
+  const shared = b.filter((v) => setA.has(v)).length;
+  return shared / Math.max(a.length, b.length);
+}
+
+// ---------------------------------------------------------------------------
+// Nest activity signal (0-100)
+// Rewards shared communities, post reactions to each other, and co-presence
+// ---------------------------------------------------------------------------
+
+export interface NestActivity {
+  community_ids: string[];
+  reacted_to_user_ids: string[];   // user IDs whose posts this user has reacted to
+  post_count: number;
+  mutual_reaction_count?: number;  // filled in server-side per pair
+}
+
+export function computeNestActivitySignal(
+  activityA: NestActivity | null,
+  activityB: NestActivity | null
+): { score: number; notes: string[] } {
+  if (!activityA || !activityB) return { score: 0, notes: [] };
+
+  let score = 0;
+  const notes: string[] = [];
+
+  // Shared communities (40 pts)
+  const communityScore = overlapScore(activityA.community_ids, activityB.community_ids);
+  score += communityScore * 40;
+  if (communityScore > 0) {
+    const shared = activityA.community_ids.filter((c) => activityB.community_ids.includes(c)).length;
+    notes.push(`${shared} shared ${shared === 1 ? 'community' : 'communities'}`);
+  }
+
+  // Mutual reactions (40 pts) — they've already noticed each other in the Nest
+  const mutualReactions = activityA.mutual_reaction_count ?? 0;
+  const reactionScore = Math.min(1, mutualReactions / 5);
+  score += reactionScore * 40;
+  if (mutualReactions > 0) notes.push('already active in each other\'s posts');
+
+  // Both are active posters (20 pts) — active people make better intro candidates
+  const bothActive = activityA.post_count > 0 && activityB.post_count > 0;
+  if (bothActive) {
+    score += 20;
+    notes.push('both active in the Nest');
+  }
+
+  return { score: Math.round(Math.min(100, score)), notes };
+}
+
 export interface TotalSignalInput {
-  personality: number;
-  interests: number;
-  community: number;
-  interaction?: number;
-  introduction?: number;
+  personality: number;       // Connection Style trait alignment
+  datePreference: number;    // Dating preference compatibility
+  nestActivity: number;      // Shared Nest activity
+  interests?: number;        // Shared user interests
+  community?: number;        // Legacy — now folded into nestActivity
 }
 
 export function computeTotalSignal(signals: TotalSignalInput): number {
-  const { personality, interests, community, interaction = 0, introduction = 0 } = signals;
+  const { personality, datePreference, nestActivity, interests = 0 } = signals;
+  // Weights: personality 40%, date prefs 30%, nest activity 20%, interests 10%
   return Math.round(
-    personality   * 0.30 +
-    interests     * 0.20 +
-    community     * 0.15 +
-    interaction   * 0.20 +
-    introduction  * 0.15
+    personality    * 0.40 +
+    datePreference * 0.30 +
+    nestActivity   * 0.20 +
+    interests      * 0.10
   );
 }
 

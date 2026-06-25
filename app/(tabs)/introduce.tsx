@@ -15,13 +15,12 @@ import { Theme, Colors } from '../../src/constants/colors';
 import { useAuthStore } from '../../src/store/authStore';
 import { supabase } from '../../src/lib/supabase';
 import { Button } from '../../src/components/ui/Button';
-
-interface SuggestedPair {
-  personA: { id: string; display_name: string; username: string };
-  personB: { id: string; display_name: string; username: string };
-  score: number;
-  reason: string;
-}
+import {
+  fetchSuggestedPairs,
+  getSignalLabel,
+  getSignalColor,
+  SuggestedPair,
+} from '../../src/services/suggestionService';
 
 interface Introduction {
   id: string;
@@ -69,10 +68,8 @@ export default function IntroduceScreen() {
   async function fetchSuggestions() {
     if (!appUser?.id) return;
     try {
-      const { data, error } = await supabase.functions.invoke('suggest-introductions', {
-        body: { connectorId: appUser.id, limit: 5 },
-      });
-      if (!error && data?.pairs?.length) setSuggestions(data.pairs);
+      const pairs = await fetchSuggestedPairs(appUser.id);
+      if (pairs.length) setSuggestions(pairs);
     } catch {
       // non-critical — silently skip
     }
@@ -168,33 +165,7 @@ export default function IntroduceScreen() {
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.suggestionsList}
-            renderItem={({ item }) => (
-              <Pressable
-                style={styles.suggestionCard}
-                onPress={() =>
-                  router.push(
-                    `/introduce/compose?personAId=${item.personA.id}&personAName=${encodeURIComponent(item.personA.display_name)}&personBId=${item.personB.id}&personBName=${encodeURIComponent(item.personB.display_name)}`
-                  )
-                }
-              >
-                <View style={styles.suggestionAvatars}>
-                  <View style={styles.suggestionAvatar}>
-                    <Text style={styles.suggestionInitial}>{item.personA.display_name[0]}</Text>
-                  </View>
-                  <Text style={styles.suggestionDiamond}>✦</Text>
-                  <View style={styles.suggestionAvatar}>
-                    <Text style={styles.suggestionInitial}>{item.personB.display_name[0]}</Text>
-                  </View>
-                </View>
-                <Text style={styles.suggestionNames} numberOfLines={1}>
-                  {item.personA.display_name} & {item.personB.display_name}
-                </Text>
-                <Text style={styles.suggestionReason} numberOfLines={2}>{item.reason}</Text>
-                <View style={styles.suggestionScore}>
-                  <Text style={styles.suggestionScoreText}>{item.score}% match</Text>
-                </View>
-              </Pressable>
-            )}
+            renderItem={({ item }) => <SuggestionCard pair={item} />}
           />
         </View>
       )}
@@ -226,6 +197,65 @@ export default function IntroduceScreen() {
         </ScrollView>
       )}
     </SafeAreaView>
+  );
+}
+
+function SuggestionCard({ pair }: { pair: SuggestedPair }) {
+  const label = getSignalLabel(pair.totalScore);
+  const labelColor = getSignalColor(pair.totalScore);
+
+  return (
+    <Pressable
+      style={styles.suggestionCard}
+      onPress={() =>
+        router.push(
+          `/introduce/compose?personAId=${pair.personA.id}&personAName=${encodeURIComponent(pair.personA.display_name)}&personBId=${pair.personB.id}&personBName=${encodeURIComponent(pair.personB.display_name)}`
+        )
+      }
+    >
+      {/* Avatars */}
+      <View style={styles.suggestionAvatars}>
+        <View style={styles.suggestionAvatar}>
+          <Text style={styles.suggestionInitial}>{pair.personA.display_name[0]}</Text>
+        </View>
+        <Text style={styles.suggestionDiamond}>✦</Text>
+        <View style={styles.suggestionAvatar}>
+          <Text style={styles.suggestionInitial}>{pair.personB.display_name[0]}</Text>
+        </View>
+      </View>
+
+      {/* Names */}
+      <Text style={styles.suggestionNames} numberOfLines={1}>
+        {pair.personA.display_name} & {pair.personB.display_name}
+      </Text>
+
+      {/* Signal label */}
+      <Text style={[styles.suggestionSignalLabel, { color: labelColor }]}>{label}</Text>
+
+      {/* Three-part signal bar */}
+      <View style={styles.signalBarRow}>
+        <View style={styles.signalBarTrack}>
+          <View style={[styles.signalBarFill, styles.signalBarStyle, { flex: pair.connectionStyleScore }]} />
+          <View style={[styles.signalBarFill, styles.signalBarDateStyle, { flex: pair.datePreferenceScore }]} />
+          <View style={[styles.signalBarFill, styles.signalBarNestStyle, { flex: pair.nestActivityScore }]} />
+          <View style={{ flex: Math.max(0, 300 - pair.connectionStyleScore - pair.datePreferenceScore - pair.nestActivityScore) }} />
+        </View>
+      </View>
+      <View style={styles.signalBarLegend}>
+        <Text style={styles.legendDot}>◆ <Text style={styles.legendLabel}>Style</Text></Text>
+        <Text style={[styles.legendDot, styles.legendDate]}>◆ <Text style={styles.legendLabel}>Prefs</Text></Text>
+        <Text style={[styles.legendDot, styles.legendNest]}>◆ <Text style={styles.legendLabel}>Nest</Text></Text>
+      </View>
+
+      {/* Reasons */}
+      {pair.reasons.length > 0 && (
+        <Text style={styles.suggestionReason} numberOfLines={2}>
+          {pair.reasons.join(' · ')}
+        </Text>
+      )}
+
+      <Text style={styles.suggestionCta}>Introduce →</Text>
+    </Pressable>
   );
 }
 
@@ -399,38 +429,44 @@ const styles = StyleSheet.create({
   },
   suggestionsList: { paddingHorizontal: 16, gap: 10 },
   suggestionCard: {
-    width: 160,
+    width: 200,
     backgroundColor: Colors.plum[800],
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.plum[700],
-    padding: 12,
-    gap: 6,
+    padding: 14,
+    gap: 8,
   },
-  suggestionAvatars: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  suggestionAvatars: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   suggestionAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34, height: 34, borderRadius: 17,
     backgroundColor: Colors.plum[700],
-    borderWidth: 1.5,
-    borderColor: Colors.blush[500],
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 1.5, borderColor: Colors.blush[500],
+    alignItems: 'center', justifyContent: 'center',
   },
-  suggestionInitial: { fontSize: 13, fontWeight: '700', color: Colors.blush[400] },
-  suggestionDiamond: { fontSize: 12, color: Colors.champagne[400] },
+  suggestionInitial: { fontSize: 14, fontWeight: '700', color: Colors.blush[400] },
+  suggestionDiamond: { fontSize: 14, color: Colors.champagne[400] },
   suggestionNames: { fontSize: 13, fontWeight: '600', color: Colors.ivory },
-  suggestionReason: { fontSize: 11, color: Colors.plum[400], lineHeight: 16 },
-  suggestionScore: {
-    alignSelf: 'flex-start',
+  suggestionSignalLabel: { fontSize: 11, fontWeight: '700' },
+  signalBarRow: { marginTop: 2 },
+  signalBarTrack: {
+    height: 4,
+    borderRadius: 2,
+    flexDirection: 'row',
+    overflow: 'hidden',
     backgroundColor: Colors.plum[700],
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    marginTop: 2,
   },
-  suggestionScoreText: { fontSize: 11, color: Colors.champagne[400], fontWeight: '600' },
+  signalBarFill: { height: 4 },
+  signalBarStyle: { backgroundColor: Colors.blush[500] },
+  signalBarDateStyle: { backgroundColor: Colors.champagne[400] },
+  signalBarNestStyle: { backgroundColor: '#7b6fa0' },
+  signalBarLegend: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  legendDot: { fontSize: 9, color: Colors.blush[500] },
+  legendDate: { color: Colors.champagne[400] },
+  legendNest: { color: '#7b6fa0' },
+  legendLabel: { color: Colors.plum[400], fontSize: 9 },
+  suggestionReason: { fontSize: 11, color: Colors.plum[300], lineHeight: 15 },
+  suggestionCta: { fontSize: 12, color: Colors.champagne[400], fontWeight: '600', marginTop: 2 },
   empty: { alignItems: 'center', paddingTop: 60, gap: 12, paddingHorizontal: 32 },
   emptyIcon: { fontSize: 40, color: Colors.plum[600] },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.ivory, textAlign: 'center' },
