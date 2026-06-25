@@ -3,12 +3,14 @@ import {
   View,
   Text,
   FlatList,
+  SectionList,
   StyleSheet,
   Pressable,
   SafeAreaView,
   Platform,
   ActivityIndicator,
   RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
@@ -24,16 +26,31 @@ interface Thread {
   other_user?: { id: string; display_name: string; username: string } | null;
 }
 
+interface PendingIntro {
+  id: string;
+  status: string;
+  note: string | null;
+  created_at: string;
+  connector: { display_name: string } | null;
+  person_a: { id: string; display_name: string } | null;
+  person_b: { id: string; display_name: string } | null;
+}
+
 export default function MessagesScreen() {
   const { appUser } = useAuthStore();
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [pendingIntros, setPendingIntros] = useState<PendingIntro[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  async function fetchData() {
+    if (!appUser?.id) return;
+    await Promise.all([fetchThreads(), fetchPendingIntros()]);
+  }
 
   async function fetchThreads() {
     if (!appUser?.id) return;
 
-    // Fetch threads the current user is part of
     const { data: threadData, error } = await supabase
       .from('direct_threads')
       .select('id, participant_ids, last_message_at, created_at')
@@ -42,7 +59,6 @@ export default function MessagesScreen() {
 
     if (error || !threadData) return;
 
-    // Fetch the other participant's profile for each thread
     const enriched = await Promise.all(
       threadData.map(async (thread) => {
         const otherId = thread.participant_ids.find((id: string) => id !== appUser.id);
@@ -54,7 +70,6 @@ export default function MessagesScreen() {
           .eq('id', otherId)
           .single();
 
-        // Get last message
         const { data: lastMsg } = await supabase
           .from('direct_messages')
           .select('body')
@@ -70,13 +85,62 @@ export default function MessagesScreen() {
     setThreads(enriched);
   }
 
+  async function fetchPendingIntros() {
+    if (!appUser?.id) return;
+
+    // Intros where the current user is person_a or person_b and still needs to respond
+    const { data } = await supabase
+      .from('introductions')
+      .select(`
+        id, status, note, created_at,
+        connector:app_users!connector_id(display_name),
+        person_a:app_users!person_a_id(id, display_name),
+        person_b:app_users!person_b_id(id, display_name)
+      `)
+      .or(`person_a_id.eq.${appUser.id},person_b_id.eq.${appUser.id}`)
+      .in('status', ['pending', 'a_accepted', 'b_accepted'])
+      .order('created_at', { ascending: false });
+
+    if (!data) return;
+
+    // Filter to only show intros that still need THIS user's response
+    const needsResponse = (data as unknown as PendingIntro[]).filter((intro) => {
+      const isA = (intro.person_a as any)?.id === appUser.id;
+      const isB = (intro.person_b as any)?.id === appUser.id;
+      if (isA && (intro.status === 'pending' || intro.status === 'b_accepted')) return true;
+      if (isB && (intro.status === 'pending' || intro.status === 'a_accepted')) return true;
+      return false;
+    });
+
+    setPendingIntros(needsResponse);
+  }
+
   useEffect(() => {
-    fetchThreads().finally(() => setLoading(false));
+    fetchData().finally(() => setLoading(false));
+
+    // Realtime: refresh when an introduction changes status
+    const sub = supabase
+      .channel('messages-intros')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'introductions',
+        filter: `person_a_id=eq.${appUser?.id}`,
+      }, fetchPendingIntros)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'introductions',
+        filter: `person_b_id=eq.${appUser?.id}`,
+      }, fetchPendingIntros)
+      .subscribe();
+
+    return () => { supabase.removeChannel(sub); };
   }, [appUser?.id]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchThreads();
+    await fetchData();
     setRefreshing(false);
   }, [appUser?.id]);
 
@@ -92,17 +156,81 @@ export default function MessagesScreen() {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Messages</Text>
+        {pendingIntros.length > 0 && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{pendingIntros.length}</Text>
+          </View>
+        )}
       </View>
 
-      <FlatList
-        data={threads}
-        keyExtractor={(item) => item.id}
+      <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.blush[500]} />}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={<EmptyState />}
-        renderItem={({ item }) => <ThreadRow thread={item} />}
-      />
+        contentContainerStyle={styles.scroll}
+      >
+        {/* Pending introductions inbox */}
+        {pendingIntros.length > 0 && (
+          <View style={styles.inboxSection}>
+            <Text style={styles.sectionLabel}>Pending Introductions</Text>
+            {pendingIntros.map((intro) => (
+              <PendingIntroCard key={intro.id} intro={intro} userId={appUser?.id ?? ''} />
+            ))}
+          </View>
+        )}
+
+        {/* Conversations */}
+        {threads.length > 0 && (
+          <View style={styles.threadsSection}>
+            {pendingIntros.length > 0 && <Text style={styles.sectionLabel}>Conversations</Text>}
+            {threads.map((thread) => (
+              <ThreadRow key={thread.id} thread={thread} />
+            ))}
+          </View>
+        )}
+
+        {pendingIntros.length === 0 && threads.length === 0 && <EmptyState />}
+      </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function PendingIntroCard({ intro, userId }: { intro: PendingIntro; userId: string }) {
+  const connector = intro.connector as any;
+  const personA = intro.person_a as any;
+  const personB = intro.person_b as any;
+  const isA = personA?.id === userId;
+  const otherPerson = isA ? personB : personA;
+
+  const waitingOnMe =
+    (isA && (intro.status === 'pending' || intro.status === 'b_accepted')) ||
+    (!isA && (intro.status === 'pending' || intro.status === 'a_accepted'));
+
+  return (
+    <Pressable
+      style={styles.introCard}
+      onPress={() => router.push(`/introduce/${intro.id}`)}
+    >
+      <View style={styles.introCardLeft}>
+        <View style={styles.introAvatar}>
+          <Text style={styles.introAvatarText}>
+            {otherPerson?.display_name?.[0]?.toUpperCase() ?? '?'}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.introCardBody}>
+        <Text style={styles.introTitle}>
+          Meet <Text style={styles.introBold}>{otherPerson?.display_name ?? 'Someone'}</Text>
+        </Text>
+        <Text style={styles.introSub} numberOfLines={1}>
+          Introduced by {connector?.display_name ?? 'someone'}
+          {intro.note ? ` · "${intro.note}"` : ''}
+        </Text>
+        <View style={[styles.introStatusPill, waitingOnMe && styles.introStatusPillActive]}>
+          <Text style={[styles.introStatusText, waitingOnMe && styles.introStatusTextActive]}>
+            {waitingOnMe ? 'Respond →' : 'Waiting on them'}
+          </Text>
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -166,9 +294,70 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.plum[800],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   headerTitle: { fontSize: 22, fontWeight: '700', color: Colors.ivory },
-  list: { paddingBottom: 16 },
+  badge: {
+    backgroundColor: Colors.blush[500],
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  badgeText: { fontSize: 12, fontWeight: '700', color: Colors.ivory },
+  scroll: { paddingBottom: 32 },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.plum[400],
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 8,
+  },
+  inboxSection: { borderBottomWidth: 1, borderBottomColor: Colors.plum[800], paddingBottom: 8 },
+  threadsSection: {},
+  // Pending intro card
+  introCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.plum[800],
+  },
+  introCardLeft: {},
+  introAvatar: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: Colors.plum[700],
+    borderWidth: 2, borderColor: Colors.champagne[400],
+    alignItems: 'center', justifyContent: 'center',
+  },
+  introAvatarText: { fontSize: 18, fontWeight: '700', color: Colors.champagne[400] },
+  introCardBody: { flex: 1, gap: 3 },
+  introTitle: { fontSize: 15, color: Colors.ivory },
+  introBold: { fontWeight: '700' },
+  introSub: { fontSize: 13, color: Colors.plum[400], lineHeight: 18 },
+  introStatusPill: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: Colors.plum[800],
+    borderWidth: 1,
+    borderColor: Colors.plum[600],
+  },
+  introStatusPillActive: { borderColor: Colors.blush[500], backgroundColor: 'rgba(226,80,122,0.1)' },
+  introStatusText: { fontSize: 12, color: Colors.plum[400], fontWeight: '600' },
+  introStatusTextActive: { color: Colors.blush[400] },
+  // Thread row
   row: {
     flexDirection: 'row',
     alignItems: 'center',

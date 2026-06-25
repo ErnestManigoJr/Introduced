@@ -7,8 +7,11 @@ import {
   SafeAreaView,
   ScrollView,
   Switch,
+  ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
+import { supabase } from '../../src/lib/supabase';
+import { useAuthStore } from '../../src/store/authStore';
 
 type VisibilityOption = 'Public' | 'Connections Only' | 'Private';
 type SearchOption = 'Everyone' | 'Hidden';
@@ -70,13 +73,28 @@ const scStyles = StyleSheet.create({
 });
 
 export default function PrivacyPreferencesScreen() {
+  const { appUser } = useAuthStore();
   const [visibility, setVisibility] = useState<VisibilityOption>('Public');
   const [searchVisibility, setSearchVisibility] = useState<SearchOption>('Everyone');
   const [messages, setMessages] = useState<MessagesOption>('Everyone');
   const [showOnline, setShowOnline] = useState(true);
   const [locationPref, setLocationPref] = useState<LocationOption>('City');
+  const [saving, setSaving] = useState(false);
 
-  function handleContinue() {
+  async function handleContinue() {
+    if (appUser?.id) {
+      setSaving(true);
+      await supabase.from('profiles').upsert({
+        user_id: appUser.id,
+        privacy_profile_visibility: visibility,
+        privacy_search_visibility: searchVisibility,
+        privacy_messages_from: messages,
+        privacy_show_online: showOnline,
+        privacy_location_precision: locationPref,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      setSaving(false);
+    }
     router.push('/onboarding/dating-preferences');
   }
 
@@ -151,8 +169,10 @@ export default function PrivacyPreferencesScreen() {
           />
         </View>
 
-        <Pressable style={styles.primaryButton} onPress={handleContinue}>
-          <Text style={styles.primaryButtonText}>Continue</Text>
+        <Pressable style={[styles.primaryButton, saving && { opacity: 0.6 }]} onPress={handleContinue} disabled={saving}>
+          {saving
+            ? <ActivityIndicator color="#FAF7F2" />
+            : <Text style={styles.primaryButtonText}>Continue</Text>}
         </Pressable>
       </ScrollView>
     </SafeAreaView>
