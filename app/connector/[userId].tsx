@@ -7,9 +7,13 @@ import {
   Pressable,
   ActivityIndicator,
   Linking,
+  TextInput,
+  Alert,
+  Modal,
+  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
@@ -28,6 +32,7 @@ interface ConnectorProfile {
   sponsor_active: boolean;
   total_intros: number;
   successful_matches: number;
+  verified_connector: boolean;
   app_user: { display_name: string; username: string } | null;
 }
 
@@ -37,10 +42,17 @@ export default function ConnectorProfileScreen() {
   const [profile, setProfile] = useState<ConnectorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [recentIntros, setRecentIntros] = useState<any[]>([]);
+  const [requestStatus, setRequestStatus] = useState<string | null>(null);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestNote, setRequestNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const isOwnProfile = userId === appUser?.id;
 
   useEffect(() => {
     if (!userId) return;
     loadProfile();
+    if (!isOwnProfile && appUser?.id) checkExistingRequest();
   }, [userId]);
 
   async function loadProfile() {
@@ -50,11 +62,8 @@ export default function ConnectorProfileScreen() {
       .eq('user_id', userId)
       .single();
 
-    if (data) {
-      setProfile(data as unknown as ConnectorProfile);
-    }
+    if (data) setProfile(data as unknown as ConnectorProfile);
 
-    // Fetch recent successful intros by this connector
     const { data: intros } = await supabase
       .from('introductions')
       .select(`
@@ -71,6 +80,35 @@ export default function ConnectorProfileScreen() {
     setLoading(false);
   }
 
+  async function checkExistingRequest() {
+    const { data } = await supabase
+      .from('intro_requests')
+      .select('status')
+      .eq('requester_id', appUser!.id)
+      .eq('connector_id', userId)
+      .single();
+    if (data) setRequestStatus(data.status);
+  }
+
+  async function submitRequest() {
+    if (!appUser?.id || !userId) return;
+    setSubmitting(true);
+    const { error } = await supabase.from('intro_requests').insert({
+      requester_id: appUser.id,
+      connector_id: userId,
+      note: requestNote.trim() || null,
+    });
+    setSubmitting(false);
+    if (error) {
+      Alert.alert('Error', 'Could not send request. Please try again.');
+    } else {
+      setRequestStatus('pending');
+      setShowRequestModal(false);
+      setRequestNote('');
+      Alert.alert('Request sent!', `${(profile?.app_user as any)?.display_name} will be notified.`);
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -83,70 +121,147 @@ export default function ConnectorProfileScreen() {
   const successRate = profile && profile.total_intros > 0
     ? Math.round((profile.successful_matches / profile.total_intros) * 100)
     : 0;
+  const isVerified = profile?.verified_connector || (profile?.successful_matches ?? 0) >= 5;
 
   return (
-    <ScrollView style={styles.safe} contentContainerStyle={styles.scroll}>
-      {/* Banner + Avatar */}
-      <View style={styles.banner} />
-      <View style={styles.avatarRow}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarInitial}>
-            {appUserData?.display_name?.[0]?.toUpperCase() ?? '?'}
-          </Text>
+    <>
+      <ScrollView style={styles.safe} contentContainerStyle={styles.scroll}>
+        {/* Banner + Avatar */}
+        <View style={styles.banner} />
+        <View style={styles.avatarRow}>
+          <View style={[styles.avatar, isVerified && styles.avatarVerified]}>
+            <Text style={styles.avatarInitial}>
+              {appUserData?.display_name?.[0]?.toUpperCase() ?? '?'}
+            </Text>
+          </View>
+          {isOwnProfile && (
+            <Pressable style={styles.editBtn} onPress={() => router.push('/profile/connector-setup')}>
+              <Text style={styles.editBtnText}>Edit Profile</Text>
+            </Pressable>
+          )}
         </View>
-        {userId === appUser?.id && (
-          <Pressable style={styles.editBtn}>
-            <Text style={styles.editBtnText}>Edit Profile</Text>
-          </Pressable>
-        )}
-      </View>
 
-      {/* Identity */}
-      <View style={styles.identity}>
-        <Text style={styles.displayName}>{appUserData?.display_name ?? '—'}</Text>
-        {profile?.handle && <Text style={styles.handle}>@{profile.handle}</Text>}
-        {profile?.tagline && <Text style={styles.tagline}>{profile.tagline}</Text>}
-        {profile?.bio && <Text style={styles.bio}>{profile.bio}</Text>}
-      </View>
-
-      {/* Stats */}
-      <View style={styles.statsRow}>
-        <StatBox value={profile?.total_intros ?? 0} label="Introductions" />
-        <StatBox value={profile?.successful_matches ?? 0} label="Matches" />
-        <StatBox value={`${successRate}%`} label="Success Rate" />
-      </View>
-
-      {/* Sponsor card */}
-      {profile?.sponsor_active && profile.sponsor_name && (
-        <Pressable
-          style={styles.sponsorCard}
-          onPress={() => profile.sponsor_url && Linking.openURL(profile.sponsor_url)}
-        >
-          <View style={styles.sponsorLeft}>
-            <Text style={styles.sponsorBadge}>Sponsored</Text>
-            <Text style={styles.sponsorName}>{profile.sponsor_name}</Text>
-            {profile.sponsor_cta && (
-              <Text style={styles.sponsorCta}>{profile.sponsor_cta} →</Text>
+        {/* Identity */}
+        <View style={styles.identity}>
+          <View style={styles.nameRow}>
+            <Text style={styles.displayName}>{appUserData?.display_name ?? '—'}</Text>
+            {isVerified && (
+              <View style={styles.verifiedBadge}>
+                <Text style={styles.verifiedText}>✦ Verified Connector</Text>
+              </View>
             )}
           </View>
-        </Pressable>
-      )}
-
-      {/* Recent matches */}
-      {recentIntros.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Matches</Text>
-          {recentIntros.map((intro) => (
-            <View key={intro.id} style={styles.introRow}>
-              <Text style={styles.introNames}>
-                {(intro.person_a as any)?.display_name} & {(intro.person_b as any)?.display_name}
-              </Text>
-              <Text style={styles.introMatch}>✦ Match</Text>
-            </View>
-          ))}
+          {profile?.handle && <Text style={styles.handle}>@{profile.handle}</Text>}
+          {profile?.tagline && <Text style={styles.tagline}>{profile.tagline}</Text>}
+          {profile?.bio && <Text style={styles.bio}>{profile.bio}</Text>}
         </View>
-      )}
-    </ScrollView>
+
+        {/* Stats */}
+        <View style={styles.statsRow}>
+          <StatBox value={profile?.total_intros ?? 0} label="Introductions" />
+          <StatBox value={profile?.successful_matches ?? 0} label="Matches" />
+          <StatBox value={`${successRate}%`} label="Success Rate" />
+        </View>
+
+        {/* Ask to introduce me — shown to other users only */}
+        {!isOwnProfile && (
+          <View style={styles.requestSection}>
+            {requestStatus === null && (
+              <Pressable style={styles.askBtn} onPress={() => setShowRequestModal(true)}>
+                <Text style={styles.askBtnText}>Ask {appUserData?.display_name?.split(' ')[0] ?? 'them'} to Introduce Me</Text>
+              </Pressable>
+            )}
+            {requestStatus === 'pending' && (
+              <View style={styles.requestedPill}>
+                <Text style={styles.requestedPillText}>◎ Request Pending</Text>
+              </View>
+            )}
+            {requestStatus === 'accepted' && (
+              <View style={[styles.requestedPill, styles.requestedPillAccepted]}>
+                <Text style={[styles.requestedPillText, { color: Colors.blush[400] }]}>✦ Request Accepted</Text>
+              </View>
+            )}
+            {requestStatus === 'fulfilled' && (
+              <View style={[styles.requestedPill, styles.requestedPillAccepted]}>
+                <Text style={[styles.requestedPillText, { color: Colors.blush[400] }]}>✦ Introduced!</Text>
+              </View>
+            )}
+            {requestStatus === 'declined' && (
+              <View style={styles.requestedPill}>
+                <Text style={styles.requestedPillText}>Request Declined</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Sponsor card */}
+        {profile?.sponsor_active && profile.sponsor_name && (
+          <Pressable
+            style={styles.sponsorCard}
+            onPress={() => profile.sponsor_url && Linking.openURL(profile.sponsor_url)}
+          >
+            <View style={styles.sponsorLeft}>
+              <Text style={styles.sponsorBadge}>Sponsored</Text>
+              <Text style={styles.sponsorName}>{profile.sponsor_name}</Text>
+              {profile.sponsor_cta && (
+                <Text style={styles.sponsorCta}>{profile.sponsor_cta} →</Text>
+              )}
+            </View>
+          </Pressable>
+        )}
+
+        {/* Recent matches */}
+        {recentIntros.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Recent Matches</Text>
+            {recentIntros.map((intro) => (
+              <View key={intro.id} style={styles.introRow}>
+                <Text style={styles.introNames}>
+                  {(intro.person_a as any)?.display_name} & {(intro.person_b as any)?.display_name}
+                </Text>
+                <Text style={styles.introMatch}>✦ Match</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Request modal */}
+      <Modal visible={showRequestModal} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>Ask {appUserData?.display_name?.split(' ')[0]} to Introduce You</Text>
+            <Text style={styles.modalSub}>Add a note to help them understand what you're looking for (optional)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={requestNote}
+              onChangeText={setRequestNote}
+              placeholder="e.g. Looking for someone creative in NYC who loves building things..."
+              placeholderTextColor={Colors.plum[500]}
+              multiline
+              maxLength={300}
+              textAlignVertical="top"
+            />
+            <Text style={styles.charCount}>{requestNote.length}/300</Text>
+            <Pressable
+              style={[styles.modalSubmit, submitting && { opacity: 0.5 }]}
+              onPress={submitRequest}
+              disabled={submitting}
+            >
+              {submitting
+                ? <ActivityIndicator color={Colors.ivory} />
+                : <Text style={styles.modalSubmitText}>Send Request</Text>}
+            </Pressable>
+            <Pressable style={styles.modalCancel} onPress={() => setShowRequestModal(false)}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </>
   );
 }
 
@@ -178,6 +293,7 @@ const styles = StyleSheet.create({
     borderWidth: 3, borderColor: Theme.background,
     alignItems: 'center', justifyContent: 'center',
   },
+  avatarVerified: { borderColor: Colors.champagne[400] },
   avatarInitial: { fontSize: 28, fontWeight: '700', color: Colors.blush[400] },
   editBtn: {
     borderWidth: 1, borderColor: Colors.plum[600],
@@ -185,7 +301,17 @@ const styles = StyleSheet.create({
   },
   editBtnText: { fontSize: 13, color: Colors.plum[300] },
   identity: { paddingHorizontal: 16, gap: 4, marginBottom: 16 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   displayName: { fontSize: 20, fontWeight: '700', color: Colors.ivory },
+  verifiedBadge: {
+    backgroundColor: Colors.champagne[400] + '25',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: Colors.champagne[400],
+  },
+  verifiedText: { fontSize: 11, fontWeight: '700', color: Colors.champagne[400] },
   handle: { fontSize: 14, color: Colors.plum[400] },
   tagline: { fontSize: 15, color: Colors.champagne[400], fontWeight: '500', marginTop: 4 },
   bio: { fontSize: 14, color: Colors.plum[300], lineHeight: 21, marginTop: 4 },
@@ -202,6 +328,24 @@ const styles = StyleSheet.create({
   statBox: { flex: 1, alignItems: 'center', paddingVertical: 14, gap: 2 },
   statValue: { fontSize: 22, fontWeight: '700', color: Colors.ivory },
   statLabel: { fontSize: 11, color: Colors.plum[400] },
+  requestSection: { paddingHorizontal: 16, marginBottom: 16 },
+  askBtn: {
+    backgroundColor: Colors.blush[500],
+    borderRadius: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  askBtnText: { color: Colors.ivory, fontWeight: '700', fontSize: 15 },
+  requestedPill: {
+    borderRadius: 24,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.plum[600],
+    backgroundColor: Colors.plum[800],
+  },
+  requestedPillAccepted: { borderColor: Colors.blush[500] },
+  requestedPillText: { fontSize: 14, color: Colors.plum[400], fontWeight: '600' },
   sponsorCard: {
     marginHorizontal: 16,
     backgroundColor: Colors.plum[800],
@@ -229,4 +373,38 @@ const styles = StyleSheet.create({
   },
   introNames: { fontSize: 14, color: Colors.plum[200] },
   introMatch: { fontSize: 12, color: Colors.blush[400], fontWeight: '600' },
+  // Modal
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: Colors.plum[900] ?? '#1a0f22',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, gap: 12,
+    borderTopWidth: 1, borderColor: Colors.plum[700],
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: Colors.ivory },
+  modalSub: { fontSize: 13, color: Colors.plum[400], lineHeight: 19 },
+  modalInput: {
+    backgroundColor: Colors.plum[800],
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.plum[700],
+    color: Colors.ivory,
+    fontSize: 14,
+    padding: 14,
+    minHeight: 100,
+  },
+  charCount: { fontSize: 11, color: Colors.plum[500], textAlign: 'right' },
+  modalSubmit: {
+    backgroundColor: Colors.blush[500],
+    borderRadius: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  modalSubmitText: { color: Colors.ivory, fontWeight: '700', fontSize: 15 },
+  modalCancel: { paddingVertical: 10, alignItems: 'center' },
+  modalCancelText: { color: Colors.plum[400], fontSize: 14 },
 });

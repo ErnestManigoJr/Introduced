@@ -20,6 +20,7 @@ interface ConnectorRow {
   total_intros: number;
   sponsor_name: string | null;
   sponsor_active: boolean;
+  verified_connector: boolean;
   app_user: { display_name: string; username: string } | null;
 }
 
@@ -39,7 +40,7 @@ export default function LeaderboardScreen() {
   async function loadLeaderboard() {
     const { data } = await supabase
       .from('connector_profiles')
-      .select('user_id, handle, successful_matches, total_intros, sponsor_name, sponsor_active, app_user:app_users!user_id(display_name, username)')
+      .select('user_id, handle, successful_matches, total_intros, sponsor_name, sponsor_active, verified_connector, app_user:app_users!user_id(display_name, username)')
       .eq('is_public', true)
       .order('successful_matches', { ascending: false })
       .limit(50);
@@ -100,6 +101,9 @@ export default function LeaderboardScreen() {
             <View style={styles.rowInfo}>
               <View style={styles.rowNameRow}>
                 <Text style={styles.rowName}>{(item.app_user as any)?.display_name ?? '—'}</Text>
+                {(item.verified_connector || item.successful_matches >= 5) && (
+                  <Text style={styles.verifiedIcon}>✦</Text>
+                )}
                 {item.sponsor_active && item.sponsor_name && (
                   <View style={styles.sponsoredBadge}>
                     <Text style={styles.sponsoredText}>{item.sponsor_name}</Text>
@@ -185,6 +189,7 @@ const styles = StyleSheet.create({
   },
   sponsoredText: { fontSize: 10, color: Colors.champagne[400], fontWeight: '700' },
   rowHandle: { fontSize: 12, color: Colors.plum[400] },
+  verifiedIcon: { fontSize: 12, color: Colors.champagne[400], fontWeight: '700' },
   rowStats: { alignItems: 'center' },
   rowMatchCount: { fontSize: 20, fontWeight: '700', color: Colors.blush[400] },
   rowMatchLabel: { fontSize: 10, color: Colors.plum[400] },

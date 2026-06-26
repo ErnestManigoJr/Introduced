@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
@@ -22,11 +22,17 @@ interface UserResult {
 
 export default function SuggestScreen() {
   const { appUser } = useAuthStore();
-  const [step, setStep] = useState<1 | 2>(1);
+  const params = useLocalSearchParams<{ lockedPersonAId?: string; lockedPersonAName?: string }>();
+
+  const lockedA: UserResult | null = params.lockedPersonAId
+    ? { id: params.lockedPersonAId, display_name: decodeURIComponent(params.lockedPersonAName ?? ''), username: '' }
+    : null;
+
+  const [step, setStep] = useState<1 | 2>(lockedA ? 2 : 1);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UserResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [personA, setPersonA] = useState<UserResult | null>(null);
+  const [personA, setPersonA] = useState<UserResult | null>(lockedA);
   const [personB, setPersonB] = useState<UserResult | null>(null);
 
   useEffect(() => {
@@ -83,7 +89,7 @@ export default function SuggestScreen() {
 
       {/* Selection preview */}
       <View style={styles.preview}>
-        <PersonSlot label="Person A" person={personA} onClear={step === 1 ? undefined : () => { setPersonA(null); setPersonB(null); setStep(1); }} />
+        <PersonSlot label="Person A" person={personA} onClear={lockedA || step === 1 ? undefined : () => { setPersonA(null); setPersonB(null); setStep(1); }} />
         <Text style={styles.previewConnector}>✦</Text>
         <PersonSlot label="Person B" person={personB} onClear={personB ? () => { setPersonB(null); setStep(2); } : undefined} />
       </View>

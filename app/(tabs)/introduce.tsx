@@ -22,6 +22,15 @@ import {
   SuggestedPair,
 } from '../../src/services/suggestionService';
 
+interface IntroRequest {
+  id: string;
+  requester_id: string;
+  status: string;
+  note: string | null;
+  created_at: string;
+  requester: { display_name: string; username: string; bio?: string } | null;
+}
+
 interface Introduction {
   id: string;
   status: string;
@@ -56,14 +65,54 @@ export default function IntroduceScreen() {
   const { appUser, connectionStyleComplete } = useAuthStore();
   const [intros, setIntros] = useState<Introduction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'received' | 'sent'>('received');
+  const [tab, setTab] = useState<'received' | 'sent' | 'requests'>('received');
   const [suggestions, setSuggestions] = useState<SuggestedPair[]>([]);
+  const [introRequests, setIntroRequests] = useState<IntroRequest[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
 
   useEffect(() => {
     if (!appUser?.id) return;
     fetchIntros();
+    fetchIntroRequests();
     if (connectionStyleComplete) fetchSuggestions();
   }, [appUser?.id, connectionStyleComplete]);
+
+  async function fetchIntroRequests() {
+    if (!appUser?.id) return;
+    setRequestsLoading(true);
+    const { data } = await supabase
+      .from('intro_requests')
+      .select(`
+        id, requester_id, status, note, created_at,
+        requester:app_users!requester_id(display_name, username)
+      `)
+      .eq('connector_id', appUser.id)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+    if (data) setIntroRequests(data as unknown as IntroRequest[]);
+    setRequestsLoading(false);
+  }
+
+  async function handleRequest(requestId: string, requesterId: string, accept: boolean) {
+    if (!accept) {
+      await supabase.from('intro_requests').update({ status: 'declined' }).eq('id', requestId);
+      setIntroRequests((prev) => prev.filter((r) => r.id !== requestId));
+      return;
+    }
+    // Accept — update status then go to suggest screen pre-filled with requester as person A
+    await supabase.from('intro_requests').update({ status: 'accepted' }).eq('id', requestId);
+    setIntroRequests((prev) => prev.filter((r) => r.id !== requestId));
+    const { data: requester } = await supabase
+      .from('app_users')
+      .select('id, display_name')
+      .eq('id', requesterId)
+      .single();
+    if (requester) {
+      router.push(
+        `/introduce/suggest?lockedPersonAId=${requester.id}&lockedPersonAName=${encodeURIComponent(requester.display_name)}`
+      );
+    }
+  }
 
   async function fetchSuggestions() {
     if (!appUser?.id) return;
@@ -172,11 +221,18 @@ export default function IntroduceScreen() {
 
       {/* Tabs */}
       <View style={styles.tabs}>
-        {(['received', 'sent'] as const).map((t) => (
+        {(['received', 'sent', 'requests'] as const).map((t) => (
           <Pressable key={t} onPress={() => setTab(t)} style={[styles.tab, tab === t && styles.tabActive]}>
-            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-              {t === 'received' ? 'Received' : 'Sent'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
+                {t === 'received' ? 'Received' : t === 'sent' ? 'Sent' : 'Requests'}
+              </Text>
+              {t === 'requests' && introRequests.length > 0 && (
+                <View style={styles.tabBadge}>
+                  <Text style={styles.tabBadgeText}>{introRequests.length}</Text>
+                </View>
+              )}
+            </View>
           </Pressable>
         ))}
       </View>
@@ -185,6 +241,25 @@ export default function IntroduceScreen() {
         <View style={styles.centered}>
           <ActivityIndicator color={Colors.blush[500]} />
         </View>
+      ) : tab === 'requests' ? (
+        <ScrollView contentContainerStyle={styles.scroll}>
+          {introRequests.length === 0 ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>◎</Text>
+              <Text style={styles.emptyTitle}>No requests yet</Text>
+              <Text style={styles.emptyBody}>When someone asks you to introduce them, they'll appear here.</Text>
+            </View>
+          ) : (
+            introRequests.map((req) => (
+              <IntroRequestCard
+                key={req.id}
+                request={req}
+                onAccept={() => handleRequest(req.id, req.requester_id, true)}
+                onDecline={() => handleRequest(req.id, req.requester_id, false)}
+              />
+            ))
+          )}
+        </ScrollView>
       ) : (
         <ScrollView contentContainerStyle={styles.scroll}>
           {displayed.length === 0 ? (
@@ -256,6 +331,63 @@ function SuggestionCard({ pair }: { pair: SuggestedPair }) {
 
       <Text style={styles.suggestionCta}>Introduce →</Text>
     </Pressable>
+  );
+}
+
+function IntroRequestCard({
+  request,
+  onAccept,
+  onDecline,
+}: {
+  request: IntroRequest;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const requester = request.requester as any;
+  const [acting, setActing] = useState(false);
+
+  async function act(fn: () => void) {
+    setActing(true);
+    await fn();
+    setActing(false);
+  }
+
+  return (
+    <View style={styles.requestCard}>
+      <View style={styles.requestTop}>
+        <View style={styles.personChip}>
+          <Text style={styles.personInitial}>{requester?.display_name?.[0] ?? '?'}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.requestName}>{requester?.display_name ?? '—'}</Text>
+          <Text style={styles.requestHandle}>@{requester?.username ?? '—'}</Text>
+        </View>
+      </View>
+      {request.note && (
+        <Text style={styles.requestNote}>"{request.note}"</Text>
+      )}
+      {!request.note && (
+        <Text style={styles.requestNoteEmpty}>No note provided</Text>
+      )}
+      <View style={styles.requestActions}>
+        <Pressable
+          style={[styles.requestAcceptBtn, acting && { opacity: 0.5 }]}
+          onPress={() => act(onAccept)}
+          disabled={acting}
+        >
+          {acting
+            ? <ActivityIndicator color={Colors.ivory} size="small" />
+            : <Text style={styles.requestAcceptText}>Introduce Them →</Text>}
+        </Pressable>
+        <Pressable
+          style={[styles.requestDeclineBtn, acting && { opacity: 0.5 }]}
+          onPress={() => act(onDecline)}
+          disabled={acting}
+        >
+          <Text style={styles.requestDeclineText}>Decline</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -467,6 +599,37 @@ const styles = StyleSheet.create({
   legendLabel: { color: Colors.plum[400], fontSize: 9 },
   suggestionReason: { fontSize: 11, color: Colors.plum[300], lineHeight: 15 },
   suggestionCta: { fontSize: 12, color: Colors.champagne[400], fontWeight: '600', marginTop: 2 },
+  tabBadge: {
+    backgroundColor: Colors.blush[500],
+    borderRadius: 8, minWidth: 16, height: 16,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+  },
+  tabBadgeText: { fontSize: 10, color: Colors.ivory, fontWeight: '700' },
+  requestCard: {
+    backgroundColor: Colors.plum[800],
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: Colors.champagne[400] + '60',
+    gap: 10,
+  },
+  requestTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  requestName: { fontSize: 15, fontWeight: '700', color: Colors.ivory },
+  requestHandle: { fontSize: 12, color: Colors.plum[400] },
+  requestNote: { fontSize: 14, color: Colors.plum[200], fontStyle: 'italic', lineHeight: 20 },
+  requestNoteEmpty: { fontSize: 13, color: Colors.plum[500], fontStyle: 'italic' },
+  requestActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  requestAcceptBtn: {
+    flex: 1, backgroundColor: Colors.blush[500],
+    borderRadius: 20, paddingVertical: 10, alignItems: 'center',
+  },
+  requestAcceptText: { color: Colors.ivory, fontWeight: '700', fontSize: 14 },
+  requestDeclineBtn: {
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: 20, borderWidth: 1, borderColor: Colors.plum[600],
+    alignItems: 'center',
+  },
+  requestDeclineText: { color: Colors.plum[400], fontSize: 14 },
   empty: { alignItems: 'center', paddingTop: 60, gap: 12, paddingHorizontal: 32 },
   emptyIcon: { fontSize: 40, color: Colors.plum[600] },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.ivory, textAlign: 'center' },
