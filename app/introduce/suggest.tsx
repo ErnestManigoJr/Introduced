@@ -46,12 +46,40 @@ export default function SuggestScreen() {
 
   async function search(q: string) {
     setSearching(true);
-    const { data } = await supabase
+
+    // Fetch blocked user IDs (users that the current user has blocked or been blocked by)
+    const blockedIds: string[] = [];
+    if (appUser?.id) {
+      const { data: blocks } = await supabase
+        .from('blocks')
+        .select('blocker_id, blocked_id')
+        .or(`blocker_id.eq.${appUser.id},blocked_id.eq.${appUser.id}`);
+      for (const b of blocks ?? []) {
+        const otherId = b.blocker_id === appUser.id ? b.blocked_id : b.blocker_id;
+        if (!blockedIds.includes(otherId)) blockedIds.push(otherId);
+      }
+    }
+
+    // Fetch users closed to introductions
+    const { data: closedPrefs } = await supabase
+      .from('dating_preferences')
+      .select('user_id')
+      .eq('intro_open_status', 'not_yet');
+    const closedIds = (closedPrefs ?? []).map((p: any) => p.user_id);
+
+    const excludeIds = [...new Set([appUser?.id ?? '', ...blockedIds, ...closedIds])].filter(Boolean);
+
+    let query = supabase
       .from('app_users')
       .select('id, display_name, username')
       .or(`display_name.ilike.%${q}%,username.ilike.%${q}%`)
-      .neq('id', appUser?.id ?? '')
       .limit(20);
+
+    for (const exId of excludeIds) {
+      query = query.neq('id', exId);
+    }
+
+    const { data } = await query;
     setResults((data as UserResult[]) ?? []);
     setSearching(false);
   }

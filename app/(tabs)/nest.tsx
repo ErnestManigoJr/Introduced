@@ -119,7 +119,7 @@ export default function NestScreen() {
           contentContainerStyle={styles.list}
           ListEmptyComponent={<EmptyState />}
           renderItem={({ item }) => (
-            <PostCard post={item} onReact={react} />
+            <PostCard post={item} onReact={react} currentUserId={appUser?.id} />
           )}
         />
 
@@ -151,12 +151,35 @@ export default function NestScreen() {
   );
 }
 
-function PostCard({ post, onReact }: { post: Post; onReact: (id: string, type: string) => void }) {
+function PostCard({ post, onReact, currentUserId }: { post: Post; onReact: (id: string, type: string) => void; currentUserId?: string }) {
   const author = post.author as any;
   const timeAgo = getTimeAgo(post.created_at);
 
+  function handleLongPress() {
+    if (post.author_id === currentUserId) return; // Don't report own posts
+    Alert.alert('Post Options', undefined, [
+      {
+        text: 'Report Post',
+        style: 'destructive',
+        onPress: () => reportPost(),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  async function reportPost() {
+    await supabase.from('reports').insert({
+      reporter_id: currentUserId,
+      target_type: 'post',
+      target_id: post.id,
+      reason: 'user_report',
+      created_at: new Date().toISOString(),
+    });
+    Alert.alert('Reported', 'Thank you. We will review this post.');
+  }
+
   return (
-    <View style={styles.card}>
+    <Pressable style={styles.card} onLongPress={handleLongPress} delayLongPress={400}>
       <View style={styles.cardHeader}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>
@@ -185,7 +208,7 @@ function PostCard({ post, onReact }: { post: Post; onReact: (id: string, type: s
           <Text style={styles.commentCount}>💬 {post.comment_count}</Text>
         )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 

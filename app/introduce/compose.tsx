@@ -34,6 +34,18 @@ export default function ComposeScreen() {
   async function submit() {
     if (!appUser?.id || !params.personAId || !params.personBId) return;
 
+    // Guard: cannot introduce yourself as Person A or B
+    if (params.personAId === appUser.id || params.personBId === appUser.id) {
+      Alert.alert('Invalid Introduction', 'You cannot introduce yourself to someone else.');
+      return;
+    }
+
+    // Guard: Person A and B must be different people
+    if (params.personAId === params.personBId) {
+      Alert.alert('Invalid Introduction', 'Person A and Person B must be different people.');
+      return;
+    }
+
     if (!appUser.connection_style_complete) {
       Alert.alert(
         'Connection Style Required',

@@ -7,10 +7,17 @@ import {
   Switch,
   ActivityIndicator,
   Alert,
+  Pressable,
 } from 'react-native';
 import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
+
+interface BlockedUser {
+  id: string;
+  blocked_id: string;
+  blocked_user: { display_name: string; username: string } | null;
+}
 
 export default function PrivacyScreen() {
   const { appUser } = useAuthStore();
@@ -18,6 +25,7 @@ export default function PrivacyScreen() {
   const [openToIntros, setOpenToIntros] = useState(true);
   const [showInSearch, setShowInSearch] = useState(true);
   const [showConnectionCount, setShowConnectionCount] = useState(true);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
 
   useEffect(() => {
     load();
@@ -25,18 +33,42 @@ export default function PrivacyScreen() {
 
   async function load() {
     if (!appUser?.id) return;
-    const { data } = await supabase
-      .from('profiles')
-      .select('open_to_introductions, show_in_search, show_connection_count')
-      .eq('user_id', appUser.id)
-      .single();
+    const [profileRes, blocksRes] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('open_to_introductions, show_in_search, show_connection_count')
+        .eq('user_id', appUser.id)
+        .single(),
+      supabase
+        .from('blocks')
+        .select('id, blocked_id, blocked_user:app_users!blocked_id(display_name, username)')
+        .eq('blocker_id', appUser.id),
+    ]);
 
-    if (data) {
-      setOpenToIntros(data.open_to_introductions ?? true);
-      setShowInSearch(data.show_in_search ?? true);
-      setShowConnectionCount(data.show_connection_count ?? true);
+    if (profileRes.data) {
+      setOpenToIntros(profileRes.data.open_to_introductions ?? true);
+      setShowInSearch(profileRes.data.show_in_search ?? true);
+      setShowConnectionCount(profileRes.data.show_connection_count ?? true);
     }
+    setBlockedUsers((blocksRes.data as unknown as BlockedUser[]) ?? []);
     setLoading(false);
+  }
+
+  async function unblock(blockId: string, displayName: string) {
+    Alert.alert('Unblock', `Unblock ${displayName}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Unblock',
+        onPress: async () => {
+          const { error } = await supabase.from('blocks').delete().eq('id', blockId);
+          if (error) {
+            Alert.alert('Error', 'Could not unblock user.');
+          } else {
+            setBlockedUsers((prev) => prev.filter((b) => b.id !== blockId));
+          }
+        },
+      },
+    ]);
   }
 
   async function update(field: string, value: boolean) {
@@ -106,6 +138,38 @@ export default function PrivacyScreen() {
       <Text style={styles.note}>
         Your data is never sold to third parties. Introduced uses it only to facilitate meaningful introductions.
       </Text>
+
+      <Text style={styles.noteHighlight}>
+        Note: Your introduction visibility is also controlled by your Dating Preferences. If your intro status is set to "Not Yet", you will not appear in introduction suggestions.
+      </Text>
+
+      {/* Blocked Users */}
+      <Text style={styles.sectionHeader}>Blocked Users</Text>
+      <View style={styles.card}>
+        {blockedUsers.length === 0 ? (
+          <View style={styles.row}>
+            <Text style={[styles.rowLabel, { color: Colors.plum[500] }]}>No blocked users</Text>
+          </View>
+        ) : (
+          blockedUsers.map((block, index) => {
+            const user = block.blocked_user as any;
+            return (
+              <View key={block.id} style={[styles.row, index < blockedUsers.length - 1 && styles.rowBorder]}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>{user?.display_name ?? 'Unknown'}</Text>
+                  <Text style={styles.rowSub}>@{user?.username ?? '—'}</Text>
+                </View>
+                <Pressable
+                  onPress={() => unblock(block.id, user?.display_name ?? 'this user')}
+                  style={styles.unblockBtn}
+                >
+                  <Text style={styles.unblockBtnText}>Unblock</Text>
+                </Pressable>
+              </View>
+            );
+          })
+        )}
+      </View>
     </ScrollView>
   );
 }
@@ -139,4 +203,22 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: 15, color: Colors.ivory, fontWeight: '500' },
   rowSub: { fontSize: 12, color: Colors.plum[400], marginTop: 2 },
   note: { fontSize: 12, color: Colors.plum[500], lineHeight: 18, textAlign: 'center', marginTop: 8 },
+  noteHighlight: {
+    fontSize: 12,
+    color: Colors.champagne[400],
+    lineHeight: 18,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 4,
+    paddingHorizontal: 4,
+  },
+  unblockBtn: {
+    backgroundColor: Colors.plum[700],
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: Colors.blush[500],
+  },
+  unblockBtnText: { fontSize: 13, color: Colors.blush[400], fontWeight: '600' },
 });

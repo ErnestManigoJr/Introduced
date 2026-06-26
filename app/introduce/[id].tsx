@@ -96,6 +96,16 @@ export default function IntroDetailScreen() {
       return;
     }
 
+    // Guard: cannot accept twice
+    if (
+      (isPersonA && (intro.status === 'a_accepted' || intro.status === 'both_accepted')) ||
+      (isPersonB && (intro.status === 'b_accepted' || intro.status === 'both_accepted'))
+    ) {
+      Alert.alert('Already responded', 'You have already responded to this introduction.');
+      setActing(false);
+      return;
+    }
+
     let newStatus: string;
 
     if (!accept) {
@@ -119,9 +129,13 @@ export default function IntroDetailScreen() {
 
     // If both accepted, create a direct thread
     if (newStatus === 'both_accepted') {
+      const now = new Date().toISOString();
       const { data: thread } = await supabase
         .from('direct_threads')
-        .insert({ participant_ids: [intro.person_a_id, intro.person_b_id] })
+        .insert({
+          participant_ids: [intro.person_a_id, intro.person_b_id],
+          last_message_at: now,
+        })
         .select('id')
         .single();
 
@@ -131,6 +145,19 @@ export default function IntroDetailScreen() {
           .from('introductions')
           .update({ intro_room_id: thread.id })
           .eq('id', intro.id);
+
+        // Insert system message: "[ConnectorName] introduced [PersonAName] and [PersonBName]."
+        const connectorName = (intro.connector as any)?.display_name ?? 'Someone';
+        const personAName = (intro.person_a as any)?.display_name ?? 'Person A';
+        const personBName = (intro.person_b as any)?.display_name ?? 'Person B';
+        const systemBody = `${connectorName} introduced ${personAName} and ${personBName}.`;
+        await supabase.from('direct_messages').insert({
+          thread_id: thread.id,
+          sender_id: intro.connector_id,
+          body: systemBody,
+          is_system: true,
+          created_at: now,
+        });
       }
     }
 
