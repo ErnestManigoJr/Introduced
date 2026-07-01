@@ -11,33 +11,58 @@ export default function RootLayout() {
 
   useEffect(() => {
     // Bootstrap session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        setLoading(true);
-        const { data } = await supabase
-          .from('app_users')
-          .select('*')
-          .eq('auth_user_id', session.user.id)
-          .single();
-        setAppUser(data ?? null);
+    const bootstrap = async () => {
+      setLoading(true);
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('[Auth] getSession error:', sessionError.message);
+          return;
+        }
+        if (session?.user) {
+          const { data, error } = await supabase
+            .from('app_users')
+            .select('*')
+            .eq('auth_user_id', session.user.id)
+            .maybeSingle();
+          if (error) {
+            console.error('[Auth] app_users fetch error:', error.message);
+          }
+          // data may be null for new OAuth users — that is expected, allow onboarding to proceed
+          setAppUser(data ?? null);
+        }
+      } catch (err) {
+        console.error('[Auth] Unexpected bootstrap error:', err);
+      } finally {
         setLoading(false);
       }
-    });
+    };
+
+    bootstrap();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === 'SIGNED_OUT') {
           setAppUser(null);
+          setLoading(false);
           return;
         }
         if (session?.user) {
-          const { data } = await supabase
-            .from('app_users')
-            .select('*')
-            .eq('auth_user_id', session.user.id)
-            .single();
-          setAppUser(data ?? null);
+          try {
+            const { data, error } = await supabase
+              .from('app_users')
+              .select('*')
+              .eq('auth_user_id', session.user.id)
+              .maybeSingle();
+            if (error) {
+              console.error('[Auth] onAuthStateChange app_users error:', error.message);
+            }
+            setAppUser(data ?? null);
+          } catch (err) {
+            console.error('[Auth] onAuthStateChange unexpected error:', err);
+            setAppUser(null);
+          }
         }
       }
     );
