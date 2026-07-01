@@ -108,8 +108,14 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="community/post/[id]" />
         <Stack.Screen name="profile/connection-style" />
+        {/* Intro flow */}
+        <Stack.Screen name="introduce" />
+        <Stack.Screen name="intro-room/[id]" />
+        {/* Conversations */}
+        <Stack.Screen name="conversation" />
+        {/* Connector profiles */}
+        <Stack.Screen name="connector" />
       </Stack>
     </GestureHandlerRootView>
   );
 }
-
