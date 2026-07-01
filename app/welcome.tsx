@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,93 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Colors } from '../src/constants/colors';
+import { supabase } from '../src/lib/supabase';
+import { makeRedirectUri } from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { ENV } from '../src/lib/env';
+
+WebBrowser.maybeCompleteAuthSession();
+
+const redirectUri = makeRedirectUri({ scheme: ENV.appScheme, path: 'auth/callback' });
 
 export default function WelcomeScreen() {
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+
+  async function handleGoogleSignIn() {
+    setGoogleLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUri,
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+        },
+      });
+
+      if (error) {
+        Alert.alert('Google sign-in failed', error.message);
+        setGoogleLoading(false);
+        return;
+      }
+
+      if (data?.url) {
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
+        if (result.type !== 'success') {
+          setGoogleLoading(false);
+        }
+        // On success, deep link triggers auth/callback
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Something went wrong.');
+      setGoogleLoading(false);
+    }
+  }
+
+  async function handleAppleSignIn() {
+    setAppleLoading(true);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (!credential.identityToken) {
+        Alert.alert('Apple sign-in failed', 'No identity token received.');
+        setAppleLoading(false);
+        return;
+      }
+
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: credential.identityToken,
+      });
+
+      if (error) {
+        Alert.alert('Apple sign-in failed', error.message);
+        setAppleLoading(false);
+        return;
+      }
+
+      // Session is now set — let the root layout's onAuthStateChange pick it up
+      // and navigate via index.tsx
+      router.replace('/');
+    } catch (e: any) {
+      if (e.code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Error', e.message ?? 'Apple sign-in failed.');
+      }
+      setAppleLoading(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} bounces={false}>
@@ -33,19 +115,33 @@ export default function WelcomeScreen() {
         {/* Bottom: Auth buttons */}
         <View style={styles.bottomSection}>
           <Pressable
-            style={styles.appleButton}
-            onPress={() => router.push('/auth/sign-in')}
+            style={[styles.appleButton, appleLoading && styles.buttonDisabled]}
+            onPress={handleAppleSignIn}
+            disabled={appleLoading}
           >
-            <Text style={styles.appleButtonIcon}></Text>
-            <Text style={styles.appleButtonText}>Continue with Apple</Text>
+            {appleLoading ? (
+              <ActivityIndicator color="#1a1a1a" />
+            ) : (
+              <>
+                <Text style={styles.appleButtonIcon}></Text>
+                <Text style={styles.appleButtonText}>Continue with Apple</Text>
+              </>
+            )}
           </Pressable>
 
           <Pressable
-            style={styles.googleButton}
-            onPress={() => router.push('/auth/sign-in')}
+            style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
+            onPress={handleGoogleSignIn}
+            disabled={googleLoading}
           >
-            <Text style={styles.googleButtonIcon}>G</Text>
-            <Text style={styles.googleButtonText}>Continue with Google</Text>
+            {googleLoading ? (
+              <ActivityIndicator color="#FAF7F2" />
+            ) : (
+              <>
+                <Text style={styles.googleButtonIcon}>G</Text>
+                <Text style={styles.googleButtonText}>Continue with Google</Text>
+              </>
+            )}
           </Pressable>
 
           <Pressable
@@ -182,6 +278,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FAF7F2',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   legal: {
     fontSize: 11,
