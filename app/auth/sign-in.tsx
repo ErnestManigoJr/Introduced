@@ -9,14 +9,31 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
+import { makeRedirectUri } from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+import { ENV } from '../../src/lib/env';
+
+WebBrowser.maybeCompleteAuthSession();
+
+const redirectUri = makeRedirectUri({ scheme: ENV.appScheme, path: 'auth/callback' });
 
 export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Forgot password modal state
+  const [forgotVisible, setForgotVisible] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   async function handleSignIn() {
     if (!email.trim() || !password) {
@@ -31,6 +48,63 @@ export default function SignInScreen() {
       return;
     }
     router.replace('/');
+  }
+
+  async function handleGoogleSignIn() {
+    setGoogleLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUri,
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+        },
+      });
+
+      if (error) {
+        Alert.alert('Google sign-in failed', error.message);
+        setGoogleLoading(false);
+        return;
+      }
+
+      if (data?.url) {
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
+        if (result.type !== 'success') {
+          setGoogleLoading(false);
+        }
+        // On success, the deep link triggers auth/callback which handles routing
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Something went wrong.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    const emailToReset = resetEmail.trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailToReset || !emailRegex.test(emailToReset)) {
+      Alert.alert('Invalid email', 'Please enter a valid email address.');
+      return;
+    }
+    setResetLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(emailToReset, {
+      redirectTo: redirectUri,
+    });
+    setResetLoading(false);
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+    setResetSent(true);
+  }
+
+  function closeForgotModal() {
+    setForgotVisible(false);
+    setResetEmail('');
+    setResetSent(false);
+    setResetLoading(false);
   }
 
   return (
@@ -78,7 +152,7 @@ export default function SignInScreen() {
             )}
           </Pressable>
 
-          <Pressable onPress={() => Alert.alert('Coming soon', 'Password reset coming soon.')}>
+          <Pressable onPress={() => setForgotVisible(true)}>
             <Text style={styles.forgotPassword}>Forgot password?</Text>
           </Pressable>
 
@@ -89,11 +163,18 @@ export default function SignInScreen() {
           </View>
 
           <Pressable
-            style={styles.googleButton}
-            onPress={() => Alert.alert('Coming soon', 'Google sign-in coming soon.')}
+            style={[styles.googleButton, googleLoading && styles.googleButtonDisabled]}
+            onPress={handleGoogleSignIn}
+            disabled={googleLoading}
           >
-            <Text style={styles.googleButtonIcon}>G</Text>
-            <Text style={styles.googleButtonText}>Continue with Google</Text>
+            {googleLoading ? (
+              <ActivityIndicator color="#FAF7F2" />
+            ) : (
+              <>
+                <Text style={styles.googleButtonIcon}>G</Text>
+                <Text style={styles.googleButtonText}>Continue with Google</Text>
+              </>
+            )}
           </Pressable>
         </View>
 
@@ -104,6 +185,66 @@ export default function SignInScreen() {
           </Text>
         </Pressable>
       </ScrollView>
+
+      {/* Forgot Password Modal */}
+      <Modal
+        visible={forgotVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeForgotModal}
+      >
+        <Pressable style={styles.modalOverlay} onPress={closeForgotModal}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+              {resetSent ? (
+                <>
+                  <Text style={styles.modalTitle}>Check your email</Text>
+                  <Text style={styles.modalSubtitle}>
+                    We sent a password reset link to{' '}
+                    <Text style={styles.modalEmailBold}>{resetEmail.trim()}</Text>.
+                    {'\n\n'}Follow the link in the email to set a new password.
+                  </Text>
+                  <Pressable style={styles.modalPrimaryButton} onPress={closeForgotModal}>
+                    <Text style={styles.modalPrimaryButtonText}>Done</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.modalTitle}>Reset your password</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Enter the email address associated with your account and we'll send you a reset link.
+                  </Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="Email address"
+                    placeholderTextColor="#c49fd5"
+                    value={resetEmail}
+                    onChangeText={setResetEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    autoComplete="email"
+                    autoFocus
+                  />
+                  <Pressable
+                    style={[styles.modalPrimaryButton, resetLoading && styles.primaryButtonDisabled]}
+                    onPress={handleForgotPassword}
+                    disabled={resetLoading}
+                  >
+                    {resetLoading ? (
+                      <ActivityIndicator color="#FAF7F2" />
+                    ) : (
+                      <Text style={styles.modalPrimaryButtonText}>Send Reset Link</Text>
+                    )}
+                  </Pressable>
+                  <Pressable onPress={closeForgotModal} style={styles.modalCancelButton}>
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </Pressable>
+                </>
+              )}
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -202,6 +343,9 @@ const styles = StyleSheet.create({
     borderColor: '#FAF7F2',
     gap: 10,
   },
+  googleButtonDisabled: {
+    opacity: 0.6,
+  },
   googleButtonIcon: {
     fontSize: 18,
     fontWeight: '700',
@@ -224,5 +368,64 @@ const styles = StyleSheet.create({
   footerLinkBold: {
     color: '#e2507a',
     fontWeight: '600',
+  },
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  modalCard: {
+    backgroundColor: '#3a2248',
+    borderRadius: 20,
+    padding: 28,
+    gap: 16,
+    borderWidth: 1,
+    borderColor: '#62397a',
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#FAF7F2',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#c49fd5',
+    lineHeight: 22,
+  },
+  modalEmailBold: {
+    color: '#FAF7F2',
+    fontWeight: '600',
+  },
+  modalInput: {
+    backgroundColor: '#4a2a5c',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#FAF7F2',
+    borderWidth: 1,
+    borderColor: '#62397a',
+  },
+  modalPrimaryButton: {
+    backgroundColor: '#e2507a',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalPrimaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FAF7F2',
+  },
+  modalCancelButton: {
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  modalCancelText: {
+    fontSize: 14,
+    color: '#c49fd5',
   },
 });
