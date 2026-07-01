@@ -10,8 +10,10 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Image,
 } from 'react-native';
 import { router } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
@@ -30,8 +32,11 @@ export default function EditProfileScreen() {
   const [bio, setBio] = useState('');
   const [city, setCity] = useState('');
   const [intention, setIntention] = useState<string>('friendship');
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [existingAvatarUrl, setExistingAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [usernameError, setUsernameError] = useState('');
 
   useEffect(() => {
@@ -42,16 +47,60 @@ export default function EditProfileScreen() {
     if (!appUser?.id) return;
     const { data } = await supabase
       .from('profiles')
-      .select('bio, city, relationship_intention')
+      .select('bio, city, relationship_intention, avatar_url')
       .eq('user_id', appUser.id)
-      .single();
+      .maybeSingle();
 
     if (data) {
       setBio(data.bio ?? '');
       setCity(data.city ?? '');
       setIntention(data.relationship_intention ?? 'friendship');
+      setExistingAvatarUrl(data.avatar_url ?? null);
     }
     setLoading(false);
+  }
+
+  async function pickAvatar() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Please allow access to your photo library.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets.length > 0) {
+      setAvatarUri(result.assets[0].uri);
+    }
+  }
+
+  async function uploadAvatar(userId: string): Promise<string | null> {
+    if (!avatarUri) return existingAvatarUrl;
+    setUploadingAvatar(true);
+    try {
+      const ext = avatarUri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const path = `avatars/${userId}.${ext}`;
+      const response = await fetch(avatarUri);
+      const blob = await response.blob();
+      const { error } = await supabase.storage.from('media').upload(path, blob, {
+        contentType: `image/${ext}`,
+        upsert: true,
+      });
+      if (error) {
+        console.error('[Avatar] Upload error:', error.message);
+        return existingAvatarUrl;
+      }
+      const { data } = supabase.storage.from('media').getPublicUrl(path);
+      return data.publicUrl;
+    } catch (err) {
+      console.error('[Avatar] Unexpected error:', err);
+      return existingAvatarUrl;
+    } finally {
+      setUploadingAvatar(false);
+    }
   }
 
   async function save() {
@@ -73,13 +122,15 @@ export default function EditProfileScreen() {
         .select('id')
         .eq('username', trimmedUsername)
         .neq('id', appUser.id)
-        .single();
+        .maybeSingle();
       if (existing) {
         setUsernameError('That username is already taken.');
         setSaving(false);
         return;
       }
     }
+
+    const avatarUrl = await uploadAvatar(appUser.id);
 
     const [{ error: userError }, { error: profileError }] = await Promise.all([
       supabase
@@ -93,6 +144,8 @@ export default function EditProfileScreen() {
           bio: bio.trim() || null,
           city: city.trim() || null,
           relationship_intention: intention as any,
+          avatar_url: avatarUrl,
+          updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' }),
     ]);
 
@@ -107,7 +160,7 @@ export default function EditProfileScreen() {
       .from('app_users')
       .select('*')
       .eq('id', appUser.id)
-      .single();
+      .maybeSingle();
     if (updated) setAppUser(updated as any);
 
     setSaving(false);
@@ -122,12 +175,31 @@ export default function EditProfileScreen() {
     );
   }
 
+  const avatarSource = avatarUri ?? existingAvatarUrl;
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: Theme.background }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+
+        {/* Avatar */}
+        <Pressable style={styles.avatarContainer} onPress={pickAvatar} disabled={uploadingAvatar}>
+          {avatarSource ? (
+            <Image source={{ uri: avatarSource }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Text style={styles.avatarInitial}>
+                {appUser?.display_name?.[0]?.toUpperCase() ?? '?'}
+              </Text>
+            </View>
+          )}
+          <View style={styles.avatarEditBadge}>
+            <Text style={styles.avatarEditIcon}>📷</Text>
+          </View>
+        </Pressable>
+        <Text style={styles.avatarHint}>Tap to change photo</Text>
 
         <Field label="Display Name">
           <TextInput
@@ -215,13 +287,15 @@ export default function EditProfileScreen() {
         </Pressable>
 
         <Pressable
-          style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+          style={[styles.saveBtn, (saving || uploadingAvatar) && styles.saveBtnDisabled]}
           onPress={save}
-          disabled={saving}
+          disabled={saving || uploadingAvatar}
         >
-          {saving
-            ? <ActivityIndicator color={Colors.ivory} />
-            : <Text style={styles.saveBtnText}>Save Changes</Text>}
+          {saving || uploadingAvatar ? (
+            <ActivityIndicator color={Colors.ivory} />
+          ) : (
+            <Text style={styles.saveBtnText}>Save Changes</Text>
+          )}
         </Pressable>
 
       </ScrollView>
@@ -244,6 +318,34 @@ function Field({ label, hint, error, children }: {
 const styles = StyleSheet.create({
   centered: { flex: 1, backgroundColor: Theme.background, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: 20, gap: 20, paddingBottom: 40 },
+
+  // Avatar
+  avatarContainer: { alignSelf: 'center', marginBottom: 4 },
+  avatar: { width: 96, height: 96, borderRadius: 48, borderWidth: 2.5, borderColor: Colors.blush[500] },
+  avatarPlaceholder: {
+    width: 96, height: 96, borderRadius: 48,
+    backgroundColor: Colors.plum[700],
+    borderWidth: 2.5, borderColor: Colors.blush[500],
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarInitial: { fontSize: 36, fontWeight: '700', color: Colors.blush[400] },
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.blush[500],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Theme.background,
+  },
+  avatarEditIcon: { fontSize: 14 },
+  avatarHint: { textAlign: 'center', fontSize: 12, color: Colors.plum[400], marginBottom: 8 },
+
+  // Fields
   field: { gap: 6 },
   fieldLabel: { fontSize: 13, fontWeight: '700', color: Colors.plum[300], textTransform: 'uppercase', letterSpacing: 0.5 },
   fieldHint: { fontSize: 12, color: Colors.plum[500] },
