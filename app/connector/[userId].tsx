@@ -60,7 +60,7 @@ export default function ConnectorProfileScreen() {
       .from('connector_profiles')
       .select('*, app_user:app_users!user_id(display_name, username)')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
     if (data) setProfile(data as unknown as ConnectorProfile);
 
@@ -86,7 +86,7 @@ export default function ConnectorProfileScreen() {
       .select('status')
       .eq('requester_id', appUser!.id)
       .eq('connector_id', userId)
-      .single();
+      .maybeSingle();
     if (data) setRequestStatus(data.status);
   }
 
