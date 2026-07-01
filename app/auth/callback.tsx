@@ -32,7 +32,7 @@ export default function AuthCallback() {
         .from('app_users')
         .select('*')
         .eq('auth_user_id', session.user.id)
-        .single();
+        .maybeSingle();
 
       setAppUser(appUser ?? null);
       setLoading(false);
@@ -63,3 +63,4 @@ export default function AuthCallback() {
     </View>
   );
 }
+
