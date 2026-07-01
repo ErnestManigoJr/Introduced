@@ -70,7 +70,7 @@ export default function ComposeScreen() {
         status: 'pending',
       })
       .select('id')
-      .single();
+      .maybeSingle();
 
     if (error) {
       Alert.alert('Error', 'Could not send introduction. Please try again.');
@@ -83,6 +83,13 @@ export default function ComposeScreen() {
       .from('app_users')
       .update({ introductions_made: (appUser.introductions_made ?? 0) + 1 })
       .eq('id', appUser.id);
+
+    // Compute introduction signal score in the background — writes signal_score back to the row
+    supabase.functions
+      .invoke('calculate-introduction-signal', {
+        body: { introductionId: data.id },
+      })
+      .catch((err) => console.warn('[Compose] calculate-introduction-signal failed:', err));
 
     setSubmitting(false);
     router.replace(`/introduce/${data.id}?sent=true`);
