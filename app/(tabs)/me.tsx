@@ -9,10 +9,12 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
 import { useAuthStore } from '../../src/store/authStore';
+import { supabase } from '../../src/lib/supabase';
 
 const CONNECTION_STYLE_LABELS: Record<string, string> = {
   expansive_connector: 'Expansive Connector',
@@ -25,6 +27,21 @@ const CONNECTION_STYLE_LABELS: Record<string, string> = {
 export default function MeScreen() {
   const { appUser, connectionStyleComplete, signOut } = useAuthStore();
   const [signingOut, setSigningOut] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarLoaded, setAvatarLoaded] = useState(false);
+
+  // Load avatar from profiles table on mount
+  React.useEffect(() => {
+    if (!appUser?.id) return;
+    supabase
+      .from('profiles')
+      .select('avatar_url')
+      .eq('user_id', appUser.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.avatar_url) setAvatarUrl(data.avatar_url);
+      });
+  }, [appUser?.id]);
 
   const introsMade = appUser?.introductions_made ?? 0;
   const isOpen = introsMade >= 2;
@@ -44,6 +61,8 @@ export default function MeScreen() {
     ]);
   }
 
+  const initial = appUser?.display_name?.[0]?.toUpperCase() ?? '?';
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
@@ -56,11 +75,19 @@ export default function MeScreen() {
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Avatar + name */}
         <View style={styles.profileSection}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {appUser?.display_name?.[0]?.toUpperCase() ?? '?'}
-            </Text>
-          </View>
+          <Pressable onPress={() => router.push('/profile/edit')} style={styles.avatarWrap}>
+            {avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={styles.avatarImage}
+                onLoad={() => setAvatarLoaded(true)}
+              />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarText}>{initial}</Text>
+              </View>
+            )}
+          </Pressable>
           <Text style={styles.displayName}>{appUser?.display_name ?? '—'}</Text>
           <Text style={styles.username}>@{appUser?.username ?? '—'}</Text>
           {appUser?.bio ? (
@@ -74,7 +101,7 @@ export default function MeScreen() {
 
         {/* Open to Introductions status */}
         <View style={[styles.statusCard, isOpen && styles.statusCardOpen]}>
-          <View>
+          <View style={styles.statusCardLeft}>
             <Text style={styles.statusCardLabel}>
               {isOpen ? '✦ Open to Introductions' : 'Not yet open to introductions'}
             </Text>
@@ -124,6 +151,20 @@ export default function MeScreen() {
           </View>
         </View>
 
+        {/* Connector CTA — shown if not already set up */}
+        <View style={styles.section}>
+          <Pressable
+            style={styles.connectorCta}
+            onPress={() => router.push('/profile/connector-setup')}
+          >
+            <View>
+              <Text style={styles.connectorCtaTitle}>Become a Connector</Text>
+              <Text style={styles.connectorCtaSub}>Set up your connector profile and start making matches</Text>
+            </View>
+            <Text style={styles.connectorCtaArrow}>✦</Text>
+          </Pressable>
+        </View>
+
         {/* Settings links */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Settings</Text>
@@ -163,6 +204,8 @@ function SettingsRow({ label, onPress }: { label: string; onPress: () => void })
   );
 }
 
+const AVATAR_SIZE = 80;
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Theme.background },
   header: {
@@ -186,16 +229,27 @@ const styles = StyleSheet.create({
   editBtnText: { fontSize: 13, color: Colors.plum[300], fontWeight: '500' },
   scroll: { paddingBottom: 40 },
   profileSection: { alignItems: 'center', paddingTop: 28, paddingBottom: 24, paddingHorizontal: 24 },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  avatarWrap: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    marginBottom: 14,
+    borderWidth: 2.5,
+    borderColor: Colors.blush[500],
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+  },
+  avatarFallback: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
     backgroundColor: Colors.plum[700],
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2.5,
-    borderColor: Colors.blush[500],
-    marginBottom: 14,
   },
   avatarText: { fontSize: 32, fontWeight: '700', color: Colors.blush[400] },
   displayName: { fontSize: 22, fontWeight: '700', color: Colors.ivory, marginBottom: 2 },
@@ -215,6 +269,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   statusCardOpen: { borderColor: Colors.blush[500] },
+  statusCardLeft: { flex: 1, marginRight: 12 },
   statusCardLabel: { fontSize: 14, color: Colors.champagne[400], fontWeight: '600', marginBottom: 3 },
   statusCardSub: { fontSize: 12, color: Colors.plum[400] },
   progressDots: { flexDirection: 'row', gap: 8 },
@@ -227,7 +282,14 @@ const styles = StyleSheet.create({
   },
   dotFilled: { backgroundColor: Colors.blush[500], borderColor: Colors.blush[500] },
   section: { marginHorizontal: 16, marginTop: 20 },
-  sectionTitle: { fontSize: 13, fontWeight: '600', color: Colors.plum[400], marginBottom: 10, letterSpacing: 0.5, textTransform: 'uppercase' },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.plum[400],
+    marginBottom: 10,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
   csCard: {
     backgroundColor: Colors.plum[800],
     borderRadius: 12,
@@ -263,6 +325,19 @@ const styles = StyleSheet.create({
   },
   statValue: { fontSize: 26, fontWeight: '700', color: Colors.ivory, marginBottom: 4 },
   statLabel: { fontSize: 12, color: Colors.plum[400], textAlign: 'center' },
+  connectorCta: {
+    backgroundColor: Colors.plum[800],
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: Colors.champagne[400] + '80',
+  },
+  connectorCtaTitle: { fontSize: 15, fontWeight: '600', color: Colors.champagne[400], marginBottom: 3 },
+  connectorCtaSub: { fontSize: 12, color: Colors.plum[400], maxWidth: 240 },
+  connectorCtaArrow: { fontSize: 20, color: Colors.champagne[400] },
   settingsRow: {
     flexDirection: 'row',
     alignItems: 'center',
