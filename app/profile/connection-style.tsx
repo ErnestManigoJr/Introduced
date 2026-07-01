@@ -1,98 +1,63 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
-  Animated,
-  Platform,
   SafeAreaView,
-  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
-import { INTAKE } from '../../src/constants/copy';
-import { Button } from '../../src/components/ui/Button';
-import { CONNECTION_STYLE_QUESTIONS } from '../../src/data/connectionStyleQuestions';
 import {
-  saveIntakeAnswers,
-  calculateAndSaveTraitScores,
-  markConnectionStyleComplete,
+  CONNECTION_STYLES,
+  ConnectionStyleDef,
+  getTraitScores,
 } from '../../src/services/intakeService';
 import { useAuthStore } from '../../src/store/authStore';
+import { TraitKey } from '../../src/data/connectionStyleQuestions';
 
-export default function ConnectionStyleScreen() {
+const TRAIT_DISPLAY_PAIRS: { label: string; a: TraitKey; b: TraitKey }[] = [
+  { label: 'Social Energy', a: 'social_energy', b: 'alone_recharge' },
+  { label: 'Decision Style', a: 'decision_logic', b: 'decision_feeling' },
+  { label: 'Planning', a: 'planning_preference', b: 'spontaneity' },
+  { label: 'Focus', a: 'detail_orientation', b: 'big_picture_orientation' },
+  { label: 'Communication', a: 'analytical_style', b: 'empathetic_style' },
+  { label: 'Thinking', a: 'concrete_thinking', b: 'abstract_thinking' },
+  { label: 'Emotion', a: 'emotional_expression', b: 'emotional_privacy' },
+  { label: 'Structure', a: 'structure_preference', b: 'flexibility_preference' },
+];
+
+export default function ProfileConnectionStyleScreen() {
   const { appUser } = useAuthStore();
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const [loading, setLoading] = useState(true);
+  const [scores, setScores] = useState<Record<TraitKey, number> | null>(null);
+  const styleDef = CONNECTION_STYLES.find((s) => s.key === appUser?.connection_style) ?? null;
 
-  const question = CONNECTION_STYLE_QUESTIONS[currentIndex];
-  const total    = CONNECTION_STYLE_QUESTIONS.length;
-  const progress = (currentIndex + 1) / total;
-  const selected = answers[question.key];
-  const isLast   = currentIndex === total - 1;
-
-  function selectOption(optionKey: string) {
-    setAnswers((prev) => ({ ...prev, [question.key]: optionKey }));
-  }
-
-  function animateTransition(callback: () => void) {
-    Animated.timing(fadeAnim, {
-      toValue: 0, duration: 150, useNativeDriver: true,
-    }).start(() => {
-      callback();
-      Animated.timing(fadeAnim, {
-        toValue: 1, duration: 200, useNativeDriver: true,
-      }).start();
-    });
-  }
-
-  function handleNext() {
-    if (!selected) return;
-    if (isLast) handleComplete();
-    else animateTransition(() => setCurrentIndex((i) => i + 1));
-  }
-
-  function handleBack() {
-    if (currentIndex === 0) router.back();
-    else animateTransition(() => setCurrentIndex((i) => i - 1));
-  }
-
-  async function handleComplete() {
+  useEffect(() => {
     if (!appUser?.id) return;
-    setSaving(true);
-    try {
-      const { error: saveError } = await saveIntakeAnswers(appUser.id, answers);
-      if (saveError) throw new Error(saveError);
-      const { error: scoreError } = await calculateAndSaveTraitScores(appUser.id, answers);
-      if (scoreError) throw new Error(scoreError);
-      await markConnectionStyleComplete(appUser.id);
-      setDone(true);
-    } catch (e: any) {
-      Alert.alert('Something went wrong', e.message ?? 'Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  }
+    getTraitScores(appUser.id).then(({ scores: s }) => {
+      setScores(s);
+      setLoading(false);
+    });
+  }, [appUser?.id]);
 
-  if (done) {
+  if (!styleDef) {
+    // No style yet — send them to the quiz
     return (
       <SafeAreaView style={styles.safe}>
-        <View style={styles.completionContainer}>
-          <View style={styles.completionIcon}>
-            <Text style={styles.completionEmoji}>✦</Text>
-          </View>
-          <Text style={styles.completionHeadline}>Connection Style Updated</Text>
-          <Text style={styles.completionBody}>
-            Your trait scores have been recalculated. Introduction signal will reflect your updated style.
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>No Connection Style yet</Text>
+          <Text style={styles.emptyBody}>
+            Complete the quiz to discover your style and unlock better introductions.
           </Text>
-          <View style={styles.completionFooter}>
-            <Button label="Done" onPress={() => router.back()} fullWidth size="lg" />
-          </View>
+          <Pressable
+            style={styles.ctaButton}
+            onPress={() => router.replace('/onboarding/connection-style')}
+          >
+            <Text style={styles.ctaButtonText}>Take the Quiz</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     );
@@ -100,127 +65,310 @@ export default function ConnectionStyleScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <Pressable onPress={handleBack} hitSlop={12} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </Pressable>
-        <View style={styles.progressContainer}>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progress * 100}%` as any }]} />
-          </View>
-          <Text style={styles.progressText}>{INTAKE.progress(currentIndex + 1, total)}</Text>
-        </View>
-      </View>
-
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Animated.View style={{ opacity: fadeAnim }}>
-          <View style={styles.categoryChip}>
-            <Text style={styles.categoryText}>{question.categoryLabel}</Text>
+        {/* Hero */}
+        <View style={styles.hero}>
+          <View style={styles.heroIcon}>
+            <Text style={styles.heroIconText}>✦</Text>
           </View>
-          <Text style={styles.questionText}>{question.prompt}</Text>
-          <View style={styles.optionsContainer}>
-            {question.options.map((option) => {
-              const isSelected = selected === option.key;
-              return (
-                <Pressable
-                  key={option.key}
-                  onPress={() => selectOption(option.key)}
-                  style={[styles.option, isSelected && styles.optionSelected]}
-                >
-                  <View style={[styles.optionRadio, isSelected && styles.optionRadioSelected]}>
-                    {isSelected && <View style={styles.optionRadioInner} />}
-                  </View>
-                  <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </Animated.View>
-      </ScrollView>
+          <Text style={styles.eyebrow}>Your Connection Style</Text>
+          <Text style={styles.headline}>{styleDef.label}</Text>
+          <Text style={styles.tagline}>{styleDef.tagline}</Text>
+        </View>
 
-      <View style={styles.footer}>
-        <Button
-          label={isLast ? INTAKE.complete : INTAKE.next}
-          onPress={handleNext}
-          disabled={!selected}
-          loading={saving}
-          fullWidth
-          size="lg"
-        />
-      </View>
+        {/* Description */}
+        <View style={styles.card}>
+          <Text style={styles.cardText}>{styleDef.description}</Text>
+        </View>
+
+        {/* Strengths */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Your Strengths</Text>
+          <View style={styles.pillRow}>
+            {styleDef.strengths.map((s) => (
+              <View key={s} style={styles.pill}>
+                <Text style={styles.pillText}>{s}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* Growth edge */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Growth Edge</Text>
+          <View style={styles.growthCard}>
+            <Text style={styles.growthText}>{styleDef.growthEdge}</Text>
+          </View>
+        </View>
+
+        {/* Trait spectrum bars */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Your Trait Spectrum</Text>
+          {loading ? (
+            <ActivityIndicator size="small" color={Colors.blush[500]} style={{ marginTop: 12 }} />
+          ) : scores ? (
+            <View style={styles.traitList}>
+              {TRAIT_DISPLAY_PAIRS.map((pair) => {
+                const aScore = scores[pair.a] ?? 0; // -1 to 1
+                const bScore = scores[pair.b] ?? 0;
+                // Normalize to 0-100 where 50 = neutral
+                const position = Math.round(((aScore - bScore) / 2 + 0.5) * 100);
+                const clamped = Math.max(0, Math.min(100, position));
+                return (
+                  <TraitBar
+                    key={pair.label}
+                    label={pair.label}
+                    leftLabel={pair.a.split('_').slice(-1)[0]}
+                    rightLabel={pair.b.split('_').slice(-1)[0]}
+                    position={clamped}
+                  />
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+
+        {/* Retake */}
+        <Pressable
+          style={styles.retakeButton}
+          onPress={() => router.push('/onboarding/connection-style')}
+        >
+          <Text style={styles.retakeText}>Retake Quiz</Text>
+        </Pressable>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
+function TraitBar({
+  label,
+  leftLabel,
+  rightLabel,
+  position,
+}: {
+  label: string;
+  leftLabel: string;
+  rightLabel: string;
+  position: number; // 0-100
+}) {
+  return (
+    <View style={traitStyles.row}>
+      <Text style={traitStyles.label}>{label}</Text>
+      <View style={traitStyles.barRow}>
+        <Text style={traitStyles.sideLabel} numberOfLines={1}>{leftLabel}</Text>
+        <View style={traitStyles.track}>
+          <View style={[traitStyles.fill, { width: `${position}%` as any }]} />
+          <View style={[traitStyles.thumb, { left: `${position}%` as any, marginLeft: -8 }]} />
+        </View>
+        <Text style={[traitStyles.sideLabel, { textAlign: 'right' }]} numberOfLines={1}>{rightLabel}</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Theme.background },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  safe: {
+    flex: 1,
+    backgroundColor: Theme.background,
+  },
+  scroll: {
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'android' ? 16 : 8,
-    paddingBottom: 16,
+    paddingTop: 24,
+    paddingBottom: 60,
+  },
+
+  // Empty state
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
     gap: 12,
   },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backText: { fontSize: 22, color: Colors.ivory },
-  progressContainer: { flex: 1, gap: 6 },
-  progressTrack: { height: 4, backgroundColor: Colors.plum[700], borderRadius: 2, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: Colors.blush[500], borderRadius: 2 },
-  progressText: { fontSize: 11, color: Colors.plum[300], textAlign: 'right', fontWeight: '500' },
-  scroll: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 120 },
-  categoryChip: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.plum[700],
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.ivory,
+    textAlign: 'center',
+  },
+  emptyBody: {
+    fontSize: 15,
+    color: Colors.plum[300],
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  ctaButton: {
+    marginTop: 8,
+    backgroundColor: Colors.blush[500],
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+  },
+  ctaButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.ivory,
+  },
+
+  // Hero
+  hero: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  heroIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.plum[800],
+    borderWidth: 1.5,
+    borderColor: Colors.blush[500],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  heroIconText: {
+    fontSize: 24,
+    color: Colors.champagne[400],
+  },
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.champagne[400],
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  headline: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: Colors.ivory,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  tagline: {
+    fontSize: 15,
+    color: Colors.plum[300],
+    textAlign: 'center',
+    fontStyle: 'italic',
+    lineHeight: 22,
+  },
+
+  // Cards & sections
+  card: {
+    backgroundColor: Colors.plum[800],
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: Colors.plum[700],
     marginBottom: 20,
   },
-  categoryText: { fontSize: 11, fontWeight: '600', color: Colors.champagne[400], textTransform: 'uppercase', letterSpacing: 0.8 },
-  questionText: { fontSize: 22, fontWeight: '700', color: Colors.ivory, lineHeight: 32, marginBottom: 28 },
-  optionsContainer: { gap: 12 },
-  option: {
+  cardText: {
+    fontSize: 15,
+    color: Colors.champagne[200],
+    lineHeight: 24,
+  },
+  section: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.plum[400],
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  pillRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pill: {
+    backgroundColor: 'rgba(226, 80, 122, 0.12)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: Colors.blush[500],
+  },
+  pillText: {
+    fontSize: 13,
+    color: Colors.blush[400],
+    fontWeight: '500',
+  },
+  growthCard: {
     backgroundColor: Colors.plum[800],
     borderRadius: 14,
-    borderWidth: 1.5,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.champagne[400],
+  },
+  growthText: {
+    fontSize: 14,
+    color: Colors.champagne[300],
+    lineHeight: 22,
+  },
+  traitList: {
+    gap: 16,
+  },
+  retakeButton: {
+    marginTop: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
     borderColor: Colors.plum[700],
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    gap: 14,
+    borderRadius: 12,
   },
-  optionSelected: { borderColor: Colors.blush[500], backgroundColor: 'rgba(226, 80, 122, 0.08)' },
-  optionRadio: {
-    width: 22, height: 22, borderRadius: 11, borderWidth: 2,
-    borderColor: Colors.plum[500], alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  retakeText: {
+    fontSize: 14,
+    color: Colors.plum[300],
+    fontWeight: '500',
   },
-  optionRadioSelected: { borderColor: Colors.blush[500] },
-  optionRadioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.blush[500] },
-  optionLabel: { fontSize: 15, color: Colors.plum[200], flex: 1, lineHeight: 22 },
-  optionLabelSelected: { color: Colors.ivory, fontWeight: '500' },
-  footer: {
+});
+
+const traitStyles = StyleSheet.create({
+  row: {
+    gap: 6,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.plum[300],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  barRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sideLabel: {
+    fontSize: 11,
+    color: Colors.plum[400],
+    width: 54,
+  },
+  track: {
+    flex: 1,
+    height: 6,
+    backgroundColor: Colors.plum[700],
+    borderRadius: 3,
+    overflow: 'visible',
+    position: 'relative',
+  },
+  fill: {
+    height: '100%',
+    backgroundColor: Colors.blush[500],
+    borderRadius: 3,
+    opacity: 0.4,
+  },
+  thumb: {
     position: 'absolute',
-    bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 24,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    paddingTop: 16,
-    backgroundColor: Theme.background,
-    borderTopWidth: 1,
-    borderTopColor: Colors.plum[800],
+    top: -5,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: Colors.blush[500],
+    borderWidth: 2,
+    borderColor: Colors.ivory,
   },
-  completionContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16 },
-  completionIcon: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: Colors.plum[800],
-    borderWidth: 1.5, borderColor: Colors.blush[500],
-    alignItems: 'center', justifyContent: 'center', marginBottom: 8,
-  },
-  completionEmoji: { fontSize: 32, color: Colors.champagne[400] },
-  completionHeadline: { fontSize: 24, fontWeight: '700', color: Colors.ivory, textAlign: 'center', lineHeight: 32 },
-  completionBody: { fontSize: 16, color: Colors.plum[300], textAlign: 'center', lineHeight: 26, maxWidth: 320 },
-  completionFooter: { width: '100%', marginTop: 16 },
 });
