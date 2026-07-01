@@ -36,6 +36,9 @@ interface Introduction {
   status: string;
   created_at: string;
   note: string | null;
+  connector_id: string;
+  person_a_id: string;
+  person_b_id: string;
   person_a: { display_name: string; username: string } | null;
   person_b: { display_name: string; username: string } | null;
   connector: { display_name: string } | null;
@@ -106,7 +109,7 @@ export default function IntroduceScreen() {
       .from('app_users')
       .select('id, display_name')
       .eq('id', requesterId)
-      .single();
+      .maybeSingle();
     if (requester) {
       router.push(
         `/introduce/suggest?lockedPersonAId=${requester.id}&lockedPersonAName=${encodeURIComponent(requester.display_name)}`
@@ -129,7 +132,7 @@ export default function IntroduceScreen() {
     const { data } = await supabase
       .from('introductions')
       .select(`
-        id, status, created_at, note,
+        id, status, created_at, note, connector_id, person_a_id, person_b_id,
         person_a:app_users!person_a_id(display_name, username),
         person_b:app_users!person_b_id(display_name, username),
         connector:app_users!connector_id(display_name)
@@ -142,13 +145,10 @@ export default function IntroduceScreen() {
   }
 
   const received = intros.filter(
-    (i) => (i.person_a as any)?.username !== appUser?.username &&
-            (i.person_b as any)?.username !== appUser?.username
-      ? false
-      : true
+    (i) => i.person_a_id === appUser?.id || i.person_b_id === appUser?.id
   );
   const sent = intros.filter(
-    (i) => (i.connector as any)?.display_name === appUser?.display_name
+    (i) => i.connector_id === appUser?.id
   );
 
   const displayed = tab === 'received' ? received : sent;
