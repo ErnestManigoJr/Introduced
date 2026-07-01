@@ -68,7 +68,7 @@ export default function MessagesScreen() {
           .from('app_users')
           .select('id, display_name, username')
           .eq('id', otherId)
-          .single();
+          .maybeSingle();
 
         const { data: lastMsg } = await supabase
           .from('direct_messages')
@@ -76,7 +76,7 @@ export default function MessagesScreen() {
           .eq('thread_id', thread.id)
           .order('created_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         return { ...thread, other_user: user ?? null, last_message_body: lastMsg?.body ?? null };
       })
