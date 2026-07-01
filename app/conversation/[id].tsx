@@ -72,7 +72,7 @@ export default function ConversationScreen() {
       .from('direct_threads')
       .select('id, participant_ids')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
     if (thread) {
       const otherId = thread.participant_ids.find((pid: string) => pid !== appUser.id);
@@ -81,7 +81,7 @@ export default function ConversationScreen() {
           .from('app_users')
           .select('id, display_name, username')
           .eq('id', otherId)
-          .single();
+          .maybeSingle();
         if (user) {
           setOtherUser(user as OtherUser);
           navigation.setOptions({ title: user.display_name });
