@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
@@ -65,9 +65,13 @@ export default function IntroDetailScreen() {
 
   const justSent = params.sent === 'true';
 
-  useEffect(() => {
-    fetchIntro();
-  }, [params.id]);
+  // Refresh on initial load and every time the screen regains focus
+  // (e.g. returning from the intro room after a call)
+  useFocusEffect(
+    useCallback(() => {
+      fetchIntro();
+    }, [params.id])
+  );
 
   async function fetchIntro() {
     const { data, error } = await supabase
