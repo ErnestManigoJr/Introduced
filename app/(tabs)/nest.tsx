@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { router } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
@@ -204,9 +205,9 @@ function PostCard({ post, onReact, currentUserId }: { post: Post; onReact: (id: 
             </Pressable>
           );
         })}
-        {post.comment_count > 0 && (
-          <Text style={styles.commentCount}>💬 {post.comment_count}</Text>
-        )}
+        <Pressable onPress={() => router.push(`/community/post/${post.id}`)} style={styles.reactionBtn}>
+          <Text style={styles.commentCount}>💬 {post.comment_count > 0 ? post.comment_count : 'Comment'}</Text>
+        </Pressable>
       </View>
     </Pressable>
   );
