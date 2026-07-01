@@ -40,10 +40,37 @@ const CONSENTS = [
 export default function LegalConsentScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
+  const [scrollRequired, setScrollRequired] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
 
   const consent = CONSENTS[currentIndex];
   const isLast = currentIndex === CONSENTS.length - 1;
+
+  // Derive canAgree from scroll requirement state
+  const canAgree = !scrollRequired || scrolledToBottom;
+
+  function updateScrollRequirement(nextContentHeight: number, nextViewportHeight: number) {
+    if (nextViewportHeight === 0) return; // layout not measured yet
+    const required = nextContentHeight > nextViewportHeight + 20;
+    setScrollRequired(required);
+    if (!required) {
+      // Content fits without scrolling — auto-enable the button
+      setScrolledToBottom(true);
+    }
+  }
+
+  function handleContentSizeChange(_w: number, h: number) {
+    setContentHeight(h);
+    updateScrollRequirement(h, viewportHeight);
+  }
+
+  function handleLayout(event: any) {
+    const h = event.nativeEvent.layout.height;
+    setViewportHeight(h);
+    updateScrollRequirement(contentHeight, h);
+  }
 
   function handleScroll(event: any) {
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
@@ -55,8 +82,12 @@ export default function LegalConsentScreen() {
     if (isLast) {
       router.push('/onboarding/create-identity');
     } else {
-      setCurrentIndex((i) => i + 1);
+      // Reset all scroll state for the next document
       setScrolledToBottom(false);
+      setScrollRequired(false);
+      setViewportHeight(0);
+      setContentHeight(0);
+      setCurrentIndex((i) => i + 1);
       scrollRef.current?.scrollTo({ y: 0, animated: false });
     }
   }
@@ -67,7 +98,11 @@ export default function LegalConsentScreen() {
         {CONSENTS.map((_, i) => (
           <View
             key={i}
-            style={[styles.progressDot, i === currentIndex && styles.progressDotActive, i < currentIndex && styles.progressDotDone]}
+            style={[
+              styles.progressDot,
+              i === currentIndex && styles.progressDotActive,
+              i < currentIndex && styles.progressDotDone,
+            ]}
           />
         ))}
       </View>
@@ -81,11 +116,20 @@ export default function LegalConsentScreen() {
         contentContainerStyle={styles.scrollContent}
         onScroll={handleScroll}
         scrollEventThrottle={16}
+        onContentSizeChange={handleContentSizeChange}
+        onLayout={handleLayout}
       >
         <Text style={styles.heading}>{consent.title}</Text>
         <Text style={styles.summary}>{consent.summary}</Text>
 
-        <Pressable onPress={() => Alert.alert('Coming soon', `${consent.linkLabel} will be available before public launch.`)}>
+        <Pressable
+          onPress={() =>
+            Alert.alert(
+              'Coming Soon',
+              `${consent.linkLabel} will be available before public launch.`,
+            )
+          }
+        >
           <Text style={styles.viewFullLink}>{consent.linkLabel}</Text>
         </Pressable>
 
@@ -96,15 +140,15 @@ export default function LegalConsentScreen() {
 
       <View style={styles.footer}>
         <Pressable
-          style={[styles.primaryButton, !scrolledToBottom && styles.primaryButtonDisabled]}
+          style={[styles.primaryButton, !canAgree && styles.primaryButtonDisabled]}
           onPress={handleAgree}
-          disabled={!scrolledToBottom}
+          disabled={!canAgree}
         >
           <Text style={styles.primaryButtonText}>
             {isLast ? 'I Agree — Continue' : 'I Agree'}
           </Text>
         </Pressable>
-        {!scrolledToBottom && (
+        {scrollRequired && !scrolledToBottom && (
           <Text style={styles.scrollHint}>Scroll to read before agreeing</Text>
         )}
       </View>
