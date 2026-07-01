@@ -7,35 +7,23 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Theme, Colors } from '../../src/constants/colors';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
-
-// LiveKit SDK — expo-compatible wrapper
-// In production: npm install @livekit/react-native @livekit/react-native-webrtc
-// These imports are guarded so the app doesn't crash if the package isn't installed yet
-let useLiveKitRoom: any = null;
-let VideoTrack: any = null;
-let AudioTrack: any = null;
-let RoomEvent: any = null;
-try {
-  const lk = require('@livekit/react-native');
-  useLiveKitRoom = lk.useLiveKitRoom;
-  VideoTrack = lk.VideoTrack;
-  AudioTrack = lk.AudioTrack;
-  RoomEvent = lk.RoomEvent;
-} catch {
-  // Package not yet installed — show placeholder UI
-}
-
-interface RoomParticipant {
-  id: string;
-  display_name: string;
-  isMuted: boolean;
-  isVideoOff: boolean;
-}
+import { ENV } from '../../src/lib/env';
+import {
+  Room,
+  RoomEvent,
+  Track,
+  Participant,
+  RemoteParticipant,
+  LocalParticipant,
+  ConnectionState,
+  VideoPresets,
+} from 'livekit-client';
 
 interface RoomData {
   id: string;
@@ -46,63 +34,127 @@ interface RoomData {
   host: { display_name: string } | null;
 }
 
+interface ParticipantState {
+  identity: string;
+  name: string;
+  isMuted: boolean;
+  isVideoOff: boolean;
+  isSpeaking: boolean;
+}
+
 export default function IntroRoomScreen() {
   const { appUser } = useAuthStore();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const [room, setRoom] = useState<RoomData | null>(null);
+  const [roomData, setRoomData] = useState<RoomData | null>(null);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [participants, setParticipants] = useState<RoomParticipant[]>([]);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.Disconnected);
+  const [participants, setParticipants] = useState<ParticipantState[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [elapsed, setElapsed] = useState(0);
 
+  const roomRef = useRef<Room | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!id) return;
     loadRoom();
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      cleanup();
+    };
   }, [id]);
+
+  function cleanup() {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (roomRef.current) {
+      roomRef.current.disconnect();
+      roomRef.current = null;
+    }
+  }
 
   async function loadRoom() {
     const { data, error } = await supabase
-      .from('rooms')
-      .select('id, title, status, livekit_room_name, host_id, host:app_users!host_id(display_name)')
+      .from('intro_rooms')
+      .select('id, status, livekit_room_name, introduction_id, created_by')
       .eq('id', id)
       .single();
 
     if (error || !data) {
-      Alert.alert('Error', 'Room not found.');
-      router.back();
-      return;
-    }
+      // Fall back to rooms table
+      const { data: roomData2, error: error2 } = await supabase
+        .from('rooms')
+        .select('id, title, status, livekit_room_name, host_id, host:app_users!host_id(display_name)')
+        .eq('id', id)
+        .maybeSingle();
 
-    setRoom(data as unknown as RoomData);
+      if (error2 || !roomData2) {
+        Alert.alert('Error', 'Room not found.');
+        router.back();
+        return;
+      }
+      setRoomData(roomData2 as unknown as RoomData);
+    } else {
+      // Map intro_room to RoomData shape
+      setRoomData({
+        id: data.id,
+        title: 'Intro Room',
+        status: data.status,
+        livekit_room_name: data.livekit_room_name,
+        host_id: data.created_by,
+        host: null,
+      });
+    }
     setLoading(false);
   }
 
+  function syncParticipants(room: Room) {
+    const all: ParticipantState[] = [];
+
+    // Local participant
+    const local = room.localParticipant;
+    all.push({
+      identity: local.identity,
+      name: local.name ?? local.identity,
+      isMuted: local.isMicrophoneEnabled === false,
+      isVideoOff: local.isCameraEnabled === false,
+      isSpeaking: local.isSpeaking,
+    });
+
+    // Remote participants
+    room.remoteParticipants.forEach((p: RemoteParticipant) => {
+      all.push({
+        identity: p.identity,
+        name: p.name ?? p.identity,
+        isMuted: p.isMicrophoneEnabled === false,
+        isVideoOff: p.isCameraEnabled === false,
+        isSpeaking: p.isSpeaking,
+      });
+    });
+
+    setParticipants(all);
+  }
+
   async function joinRoom() {
-    if (!room || !appUser) return;
+    if (!roomData || !appUser) return;
     setConnecting(true);
 
-    const roomName = room.livekit_room_name ?? `introduced-room-${room.id}`;
+    const livekitRoomName = roomData.livekit_room_name ?? `introduced-room-${roomData.id}`;
 
-    // If no livekit_room_name set yet, update it
-    if (!room.livekit_room_name) {
+    // Update room name in DB if not set
+    if (!roomData.livekit_room_name) {
       await supabase
-        .from('rooms')
-        .update({ livekit_room_name: roomName, status: 'live' })
-        .eq('id', room.id);
+        .from('intro_rooms')
+        .update({ livekit_room_name: livekitRoomName, status: 'active' })
+        .eq('id', roomData.id);
     }
 
-    // Fetch LiveKit token from Edge Function
+    // Fetch token from Edge Function
     const { data: fnData, error: fnError } = await supabase.functions.invoke('create-livekit-token', {
       body: {
-        roomName,
+        roomName: livekitRoomName,
         participantName: appUser.display_name,
         participantId: appUser.id,
       },
@@ -114,33 +166,90 @@ export default function IntroRoomScreen() {
       return;
     }
 
-    setToken(fnData.token);
-    setConnected(true);
-    setConnecting(false);
+    const lkToken = fnData.token;
+    setToken(lkToken);
 
-    // Start elapsed timer
-    timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+    // Create and connect LiveKit room
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      videoCaptureDefaults: {
+        resolution: VideoPresets.h360.resolution,
+      },
+    });
 
-    // Update participant count
-    await supabase.rpc('increment_room_participants', { room_id: room.id });
+    roomRef.current = room;
+
+    // Event listeners
+    room.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+      setConnectionState(state);
+      if (state === ConnectionState.Connected) {
+        setConnecting(false);
+        syncParticipants(room);
+        timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+      }
+    });
+
+    room.on(RoomEvent.ParticipantConnected, () => syncParticipants(room));
+    room.on(RoomEvent.ParticipantDisconnected, () => syncParticipants(room));
+    room.on(RoomEvent.TrackMuted, () => syncParticipants(room));
+    room.on(RoomEvent.TrackUnmuted, () => syncParticipants(room));
+    room.on(RoomEvent.ActiveSpeakersChanged, () => syncParticipants(room));
+
+    room.on(RoomEvent.Disconnected, () => {
+      setConnectionState(ConnectionState.Disconnected);
+      if (timerRef.current) clearInterval(timerRef.current);
+    });
+
+    try {
+      await room.connect(ENV.livekitUrl, lkToken);
+      await room.localParticipant.enableCameraAndMicrophone();
+      syncParticipants(room);
+    } catch (err: any) {
+      Alert.alert('Connection failed', err?.message ?? 'Could not connect to room.');
+      setConnecting(false);
+      room.disconnect();
+      roomRef.current = null;
+    }
+  }
+
+  async function toggleMute() {
+    const room = roomRef.current;
+    if (!room) return;
+    const enabled = room.localParticipant.isMicrophoneEnabled;
+    await room.localParticipant.setMicrophoneEnabled(!enabled);
+    setIsMuted(enabled); // enabled=true means we're now muting
+    syncParticipants(room);
+  }
+
+  async function toggleVideo() {
+    const room = roomRef.current;
+    if (!room) return;
+    const enabled = room.localParticipant.isCameraEnabled;
+    await room.localParticipant.setCameraEnabled(!enabled);
+    setIsVideoOff(enabled);
+    syncParticipants(room);
   }
 
   async function leaveRoom() {
     if (timerRef.current) clearInterval(timerRef.current);
 
-    if (room) {
-      await supabase.rpc('decrement_room_participants', { room_id: room.id });
+    if (roomRef.current) {
+      roomRef.current.disconnect();
+      roomRef.current = null;
+    }
 
+    if (roomData) {
       // If host is leaving, end the room
-      if (room.host_id === appUser?.id) {
+      if (roomData.host_id === appUser?.id) {
         await supabase
-          .from('rooms')
-          .update({ status: 'ended' })
-          .eq('id', room.id);
+          .from('intro_rooms')
+          .update({ status: 'ended', ended_at: new Date().toISOString() })
+          .eq('id', roomData.id);
       }
     }
 
-    setConnected(false);
+    setConnectionState(ConnectionState.Disconnected);
     setToken(null);
     router.back();
   }
@@ -153,10 +262,12 @@ export default function IntroRoomScreen() {
     );
   }
 
-  if (!room) return null;
+  if (!roomData) return null;
+
+  const isConnected = connectionState === ConnectionState.Connected;
 
   // Pre-join lobby
-  if (!connected) {
+  if (!isConnected && !connecting) {
     return (
       <View style={styles.lobby}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
@@ -165,14 +276,18 @@ export default function IntroRoomScreen() {
 
         <View style={styles.lobbyContent}>
           <Text style={styles.lobbyIcon}>◉</Text>
-          <Text style={styles.lobbyTitle}>{room.title}</Text>
-          <Text style={styles.lobbyHost}>
-            Hosted by {(room.host as any)?.display_name ?? 'Unknown'}
-          </Text>
+          <Text style={styles.lobbyTitle}>{roomData.title}</Text>
+          {roomData.host && (
+            <Text style={styles.lobbyHost}>
+              Hosted by {(roomData.host as any)?.display_name ?? 'Unknown'}
+            </Text>
+          )}
 
           <View style={styles.statusRow}>
-            <View style={[styles.statusDot, room.status === 'live' ? styles.statusLive : styles.statusWaiting]} />
-            <Text style={styles.statusLabel}>{room.status === 'live' ? 'Live now' : 'Waiting to start'}</Text>
+            <View style={[styles.statusDot, roomData.status === 'active' || roomData.status === 'live' ? styles.statusLive : styles.statusWaiting]} />
+            <Text style={styles.statusLabel}>
+              {roomData.status === 'active' || roomData.status === 'live' ? 'Live now' : 'Waiting to start'}
+            </Text>
           </View>
 
           <View style={styles.permissionNote}>
@@ -182,54 +297,68 @@ export default function IntroRoomScreen() {
           </View>
 
           <Pressable
-            style={[styles.joinBtn, connecting && styles.joinBtnDisabled]}
+            style={styles.joinBtn}
             onPress={joinRoom}
-            disabled={connecting}
           >
-            {connecting ? (
-              <ActivityIndicator color={Colors.ivory} />
-            ) : (
-              <Text style={styles.joinBtnText}>
-                {room.status === 'live' ? 'Join Room' : 'Start Room'}
-              </Text>
-            )}
+            <Text style={styles.joinBtnText}>
+              {roomData.status === 'active' || roomData.status === 'live' ? 'Join Room' : 'Start Room'}
+            </Text>
           </Pressable>
         </View>
       </View>
     );
   }
 
-  // Active room UI
+  // Connecting state
+  if (connecting || connectionState === ConnectionState.Connecting) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={Colors.blush[500]} size="large" />
+        <Text style={styles.connectingText}>Connecting…</Text>
+      </View>
+    );
+  }
+
+  // Active room
   return (
     <View style={styles.roomContainer}>
-      {/* Header */}
       <View style={styles.roomHeader}>
-        <Text style={styles.roomTitle}>{room.title}</Text>
+        <Text style={styles.roomTitle}>{roomData.title}</Text>
         <Text style={styles.roomTimer}>{formatElapsed(elapsed)}</Text>
       </View>
 
-      {/* If LiveKit SDK not installed, show placeholder video tiles */}
-      {!useLiveKitRoom ? (
-        <View style={styles.videoGrid}>
-          <VideoTile name={appUser?.display_name ?? 'You'} muted={isMuted} videoOff={isVideoOff} isYou />
-          <VideoTile name={(room.host as any)?.display_name ?? 'Guest'} muted={false} videoOff={false} />
-        </View>
-      ) : (
-        <LiveKitVideoGrid token={token!} roomUrl={process.env.EXPO_PUBLIC_LIVEKIT_URL ?? ''} />
-      )}
+      {/* Participant grid */}
+      <ScrollView contentContainerStyle={styles.videoGrid}>
+        {participants.length > 0 ? (
+          participants.map((p) => (
+            <VideoTile
+              key={p.identity}
+              name={p.name}
+              muted={p.isMuted}
+              videoOff={p.isVideoOff}
+              isSpeaking={p.isSpeaking}
+              isYou={p.identity === appUser?.id}
+            />
+          ))
+        ) : (
+          <View style={styles.centered}>
+            <Text style={styles.connectingText}>Waiting for others to join…</Text>
+          </View>
+        )}
+      </ScrollView>
 
       {/* Controls */}
       <View style={styles.controls}>
         <ControlBtn
           label={isMuted ? '🔇' : '🎙'}
           sublabel={isMuted ? 'Unmute' : 'Mute'}
-          onPress={() => setIsMuted(!isMuted)}
+          onPress={toggleMute}
           active={!isMuted}
         />
         <ControlBtn
           label={isVideoOff ? '📵' : '📹'}
           sublabel={isVideoOff ? 'Video off' : 'Video on'}
-          onPress={() => setIsVideoOff(!isVideoOff)}
+          onPress={toggleVideo}
           active={!isVideoOff}
         />
         <ControlBtn
@@ -248,10 +377,13 @@ export default function IntroRoomScreen() {
   );
 }
 
-// Placeholder tile when SDK not installed
-function VideoTile({ name, muted, videoOff, isYou }: { name: string; muted: boolean; videoOff: boolean; isYou?: boolean }) {
+function VideoTile({
+  name, muted, videoOff, isSpeaking, isYou,
+}: {
+  name: string; muted: boolean; videoOff: boolean; isSpeaking: boolean; isYou?: boolean;
+}) {
   return (
-    <View style={styles.videoTile}>
+    <View style={[styles.videoTile, isSpeaking && styles.videoTileSpeaking]}>
       <View style={styles.tileAvatar}>
         <Text style={styles.tileInitial}>{name[0]?.toUpperCase()}</Text>
       </View>
@@ -259,16 +391,8 @@ function VideoTile({ name, muted, videoOff, isYou }: { name: string; muted: bool
       <View style={styles.tileIndicators}>
         {muted && <Text style={styles.tileIndicator}>🔇</Text>}
         {videoOff && <Text style={styles.tileIndicator}>📵</Text>}
+        {isSpeaking && !muted && <Text style={styles.tileIndicator}>🔊</Text>}
       </View>
-    </View>
-  );
-}
-
-// LiveKit video grid — only rendered when SDK is available
-function LiveKitVideoGrid({ token, roomUrl }: { token: string; roomUrl: string }) {
-  return (
-    <View style={styles.videoGrid}>
-      <Text style={styles.lkPlaceholder}>LiveKit connected</Text>
     </View>
   );
 }
@@ -279,7 +403,11 @@ function ControlBtn({ label, sublabel, onPress, active, danger }: {
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.controlBtn, danger && styles.controlBtnDanger, active === false && styles.controlBtnOff]}
+      style={[
+        styles.controlBtn,
+        danger && styles.controlBtnDanger,
+        active === false && styles.controlBtnOff,
+      ]}
     >
       <Text style={styles.controlBtnEmoji}>{label}</Text>
       <Text style={styles.controlBtnLabel}>{sublabel}</Text>
@@ -294,7 +422,8 @@ function formatElapsed(secs: number): string {
 }
 
 const styles = StyleSheet.create({
-  centered: { flex: 1, backgroundColor: Theme.background, alignItems: 'center', justifyContent: 'center' },
+  centered: { flex: 1, backgroundColor: Theme.background, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  connectingText: { color: Colors.plum[400], fontSize: 14 },
 
   // Lobby
   lobby: { flex: 1, backgroundColor: Theme.background },
@@ -327,7 +456,6 @@ const styles = StyleSheet.create({
     minWidth: 200,
     alignItems: 'center',
   },
-  joinBtnDisabled: { opacity: 0.5 },
   joinBtnText: { color: Colors.ivory, fontWeight: '700', fontSize: 18 },
 
   // Active room
@@ -342,10 +470,9 @@ const styles = StyleSheet.create({
   },
   roomTitle: { fontSize: 17, fontWeight: '600', color: Colors.ivory },
   roomTimer: { fontSize: 15, color: Colors.blush[400], fontWeight: '600' },
-  videoGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8 },
+  videoGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8 },
   videoTile: {
-    flex: 1,
-    minWidth: '45%',
+    width: '47%',
     aspectRatio: 3 / 4,
     backgroundColor: Colors.plum[800],
     borderRadius: 16,
@@ -354,6 +481,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.plum[700],
     gap: 8,
+  },
+  videoTileSpeaking: {
+    borderColor: Colors.blush[500],
+    borderWidth: 2,
   },
   tileAvatar: {
     width: 64, height: 64, borderRadius: 32,
@@ -365,7 +496,6 @@ const styles = StyleSheet.create({
   tileName: { fontSize: 14, color: Colors.ivory, fontWeight: '600' },
   tileIndicators: { flexDirection: 'row', gap: 6 },
   tileIndicator: { fontSize: 16 },
-  lkPlaceholder: { color: Colors.plum[400], fontSize: 14 },
   controls: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -385,7 +515,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.plum[700],
     minWidth: 80,
   },
-  controlBtnOff: { backgroundColor: Colors.plum[900] ?? Colors.plum[800], borderColor: Colors.plum[600] },
+  controlBtnOff: { backgroundColor: '#1a0a0a', borderColor: Colors.plum[600] },
   controlBtnDanger: { backgroundColor: '#5c1a1a', borderColor: '#c0392b' },
   controlBtnEmoji: { fontSize: 24 },
   controlBtnLabel: { fontSize: 11, color: Colors.plum[300], fontWeight: '500' },
