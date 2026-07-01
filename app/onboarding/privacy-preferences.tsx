@@ -8,10 +8,15 @@ import {
   ScrollView,
   Switch,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import { useAuthStore } from '../../src/store/authStore';
+import { Colors, Theme } from '../../src/constants/colors';
+
+const ONBOARDING_STEP = 5;
+const ONBOARDING_TOTAL = 6;
 
 type VisibilityOption = 'Public' | 'Connections Only' | 'Private';
 type SearchOption = 'Everyone' | 'Hidden';
@@ -84,13 +89,36 @@ export default function PrivacyPreferencesScreen() {
   async function handleContinue() {
     if (appUser?.id) {
       setSaving(true);
-      await supabase.from('profiles').upsert({
+      // Map UI labels to DB enum values
+      const visibilityMap: Record<string, string> = {
+        'Public': 'public',
+        'Connections Only': 'connections',
+        'Private': 'private',
+      };
+      const searchMap: Record<string, string> = {
+        'Everyone': 'everyone',
+        'Hidden': 'hidden',
+      };
+      const messageMap: Record<string, string> = {
+        'Everyone': 'everyone',
+        'Connections only': 'connections',
+      };
+      const locationMap: Record<string, string> = {
+        'City': 'city',
+        'Region': 'region',
+        'Hidden': 'hidden',
+      };
+
+      await supabase.from('privacy_settings').upsert({
         user_id: appUser.id,
-        privacy_profile_visibility: visibility,
-        privacy_search_visibility: searchVisibility,
-        privacy_messages_from: messages,
-        privacy_show_online: showOnline,
-        privacy_location_precision: locationPref,
+        profile_visibility: visibilityMap[visibility] ?? 'public',
+        search_visibility: searchMap[searchVisibility] ?? 'everyone',
+        message_request_policy: messageMap[messages] ?? 'everyone',
+        show_online_status: showOnline,
+        show_location_level: locationMap[locationPref] ?? 'city',
+        introduction_visibility: 'open',
+        reshare_policy: 'allow',
+        open_to_introductions: false,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id' });
       setSaving(false);
@@ -100,6 +128,20 @@ export default function PrivacyPreferencesScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Progress bar */}
+      <View style={styles.progressOuter}>
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${(ONBOARDING_STEP / ONBOARDING_TOTAL) * 100}%` as any },
+            ]}
+          />
+        </View>
+        <Text style={styles.progressLabel}>
+          Step {ONBOARDING_STEP} of {ONBOARDING_TOTAL}
+        </Text>
+      </View>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>
           <Text style={styles.heading}>Your privacy, your rules.</Text>
@@ -184,13 +226,36 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#2D1B35',
   },
+  progressOuter: {
+    paddingHorizontal: 28,
+    paddingTop: Platform.OS === 'android' ? 16 : 8,
+    paddingBottom: 10,
+    gap: 5,
+  },
+  progressTrack: {
+    height: 4,
+    backgroundColor: Colors.plum[700],
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: Colors.blush[500],
+    borderRadius: 2,
+  },
+  progressLabel: {
+    fontSize: 11,
+    color: Colors.plum[300],
+    textAlign: 'right',
+    fontWeight: '500',
+  },
   scroll: {
     flexGrow: 1,
     paddingHorizontal: 28,
     paddingBottom: 40,
   },
   header: {
-    marginTop: 48,
+    marginTop: 32,
     marginBottom: 36,
   },
   heading: {
@@ -246,3 +311,4 @@ const styles = StyleSheet.create({
     color: '#FAF7F2',
   },
 });
+
