@@ -107,7 +107,9 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding/connection-style" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="community/post/[id]" />
+        <Stack.Screen name="profile/connection-style" />
       </Stack>
     </GestureHandlerRootView>
   );
 }
+
