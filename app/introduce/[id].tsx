@@ -22,6 +22,7 @@ interface IntroDetail {
   connector_id: string;
   person_a_id: string;
   person_b_id: string;
+  intro_room_id: string | null;
   person_a: { id: string; display_name: string; username: string } | null;
   person_b: { id: string; display_name: string; username: string } | null;
   connector: { id: string; display_name: string; username: string } | null;
@@ -72,13 +73,13 @@ export default function IntroDetailScreen() {
     const { data, error } = await supabase
       .from('introductions')
       .select(`
-        id, status, note, created_at, signal_score, connector_id, person_a_id, person_b_id,
+        id, status, note, created_at, signal_score, connector_id, person_a_id, person_b_id, intro_room_id,
         person_a:app_users!person_a_id(id, display_name, username),
         person_b:app_users!person_b_id(id, display_name, username),
         connector:app_users!connector_id(id, display_name, username)
       `)
       .eq('id', params.id)
-      .single();
+      .maybeSingle();
 
     if (!error && data) setIntro(data as unknown as IntroDetail);
     setLoading(false);
@@ -127,37 +128,27 @@ export default function IntroDetailScreen() {
       return;
     }
 
-    // If both accepted, create a direct thread
+    // If both accepted, create an intro_room for them to meet
     if (newStatus === 'both_accepted') {
-      const now = new Date().toISOString();
-      const { data: thread } = await supabase
-        .from('direct_threads')
+      const livekitRoomName = `intro-${intro.id}`;
+
+      const { data: room } = await supabase
+        .from('intro_rooms')
         .insert({
-          participant_ids: [intro.person_a_id, intro.person_b_id],
-          last_message_at: now,
+          introduction_id: intro.id,
+          livekit_room_name: livekitRoomName,
+          created_by: appUser.id,
+          status: 'waiting',
         })
         .select('id')
-        .single();
+        .maybeSingle();
 
-      if (thread) {
-        // Store thread ID on the introduction for navigation
+      if (room) {
+        // Store room ID on the introduction for navigation
         await supabase
           .from('introductions')
-          .update({ intro_room_id: thread.id })
+          .update({ intro_room_id: room.id })
           .eq('id', intro.id);
-
-        // Insert system message: "[ConnectorName] introduced [PersonAName] and [PersonBName]."
-        const connectorName = (intro.connector as any)?.display_name ?? 'Someone';
-        const personAName = (intro.person_a as any)?.display_name ?? 'Person A';
-        const personBName = (intro.person_b as any)?.display_name ?? 'Person B';
-        const systemBody = `${connectorName} introduced ${personAName} and ${personBName}.`;
-        await supabase.from('direct_messages').insert({
-          thread_id: thread.id,
-          sender_id: intro.connector_id,
-          body: systemBody,
-          is_system: true,
-          created_at: now,
-        });
       }
     }
 
@@ -190,13 +181,9 @@ export default function IntroDetailScreen() {
   const isPersonB = intro.person_b_id === appUser?.id;
   const isConnector = intro.connector_id === appUser?.id;
 
-  const canRespond =
-    (isPersonA && intro.status === 'pending') ||
-    (isPersonA && intro.status === 'b_accepted') ||
-    (isPersonB && intro.status === 'pending') ||
-    (isPersonB && intro.status === 'a_accepted') ||
-    (isPersonA && intro.status === 'a_accepted' === false && intro.status === 'pending');
-
+  // I need to respond if:
+  //  - I'm person A and haven't responded yet (pending or b already accepted)
+  //  - I'm person B and haven't responded yet (pending or a already accepted)
   const needsMyResponse =
     (isPersonA && (intro.status === 'pending' || intro.status === 'b_accepted')) ||
     (isPersonB && (intro.status === 'pending' || intro.status === 'a_accepted'));
@@ -280,14 +267,21 @@ export default function IntroDetailScreen() {
         </View>
       )}
 
-      {/* Both accepted — go to conversation */}
+      {/* Both accepted — go to intro room */}
       {intro.status === 'both_accepted' && !isConnector && intro.intro_room_id && (
         <Pressable
           style={styles.messageBtn}
-          onPress={() => router.push(`/conversation/${intro.intro_room_id}`)}
+          onPress={() => router.push(`/intro-room/${intro.intro_room_id}`)}
         >
-          <Text style={styles.messageBtnText}>Open Conversation →</Text>
+          <Text style={styles.messageBtnText}>Open Video Room →</Text>
         </Pressable>
+      )}
+
+      {/* Both accepted but no room yet — show a waiting message */}
+      {intro.status === 'both_accepted' && !isConnector && !intro.intro_room_id && (
+        <View style={styles.waitingCard}>
+          <Text style={styles.waitingText}>Your intro room is being prepared…</Text>
+        </View>
       )}
 
     </ScrollView>
@@ -401,4 +395,14 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   messageBtnText: { color: Colors.blush[400], fontWeight: '700', fontSize: 15 },
+  waitingCard: {
+    backgroundColor: Colors.plum[800],
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.plum[700],
+    marginTop: 8,
+  },
+  waitingText: { fontSize: 14, color: Colors.plum[400] },
 });
