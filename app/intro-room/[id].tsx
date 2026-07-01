@@ -32,6 +32,7 @@ interface RoomData {
   livekit_room_name: string | null;
   host_id: string;
   host: { display_name: string } | null;
+  introduction_id: string | null;
 }
 
 interface ParticipantState {
@@ -80,7 +81,7 @@ export default function IntroRoomScreen() {
       .from('intro_rooms')
       .select('id, status, livekit_room_name, introduction_id, created_by')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       // Fall back to rooms table
@@ -105,6 +106,7 @@ export default function IntroRoomScreen() {
         livekit_room_name: data.livekit_room_name,
         host_id: data.created_by,
         host: null,
+        introduction_id: data.introduction_id ?? null,
       });
     }
     setLoading(false);
@@ -240,12 +242,26 @@ export default function IntroRoomScreen() {
     }
 
     if (roomData) {
-      // If host is leaving, end the room
-      if (roomData.host_id === appUser?.id) {
-        await supabase
-          .from('intro_rooms')
-          .update({ status: 'ended', ended_at: new Date().toISOString() })
-          .eq('id', roomData.id);
+      const now = new Date().toISOString();
+
+      // End the room and record duration
+      await supabase
+        .from('intro_rooms')
+        .update({
+          status: 'ended',
+          ended_at: now,
+          duration_seconds: elapsed > 0 ? elapsed : null,
+        })
+        .eq('id', roomData.id);
+
+      // If this room was for an introduction and they actually connected (elapsed > 0),
+      // call complete-introduction to mark it done and credit the connector
+      if (roomData.introduction_id && elapsed > 0) {
+        supabase.functions
+          .invoke('complete-introduction', {
+            body: { introductionId: roomData.introduction_id },
+          })
+          .catch((err) => console.warn('[IntroRoom] complete-introduction failed:', err));
       }
     }
 
