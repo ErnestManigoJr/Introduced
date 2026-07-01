@@ -106,8 +106,12 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding/introduction-opt-in" />
         <Stack.Screen name="onboarding/connection-style" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="community/post/[id]" />
-        <Stack.Screen name="profile/connection-style" />
+        {/* Community — group registration covers [id], create, post/[id] */}
+        <Stack.Screen name="community" />
+        {/* Profile — group registration covers edit, connection-style, connector-setup, dating-preferences */}
+        <Stack.Screen name="profile" />
+        {/* Settings — group registration covers notifications, privacy, help */}
+        <Stack.Screen name="settings" />
         {/* Intro flow */}
         <Stack.Screen name="introduce" />
         <Stack.Screen name="intro-room/[id]" />
