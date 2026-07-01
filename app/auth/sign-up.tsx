@@ -41,16 +41,54 @@ export default function SignUpScreen() {
     return Object.keys(newErrors).length === 0;
   }
 
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+
   async function handleSignUp() {
     if (!validate()) return;
     setLoading(true);
-    const { error } = await supabase.auth.signUp({ email: email.trim(), password });
+    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
     setLoading(false);
     if (error) {
       setErrors({ email: error.message });
       return;
     }
+    // If session is null but user exists, Supabase requires email confirmation
+    if (data.user && !data.session) {
+      setAwaitingConfirm(true);
+      return;
+    }
+    // Session exists — confirmation disabled, proceed directly
     router.replace('/onboarding/age-consent');
+  }
+
+  if (awaitingConfirm) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.confirmContainer}>
+          <Text style={styles.confirmIcon}>✉</Text>
+          <Text style={styles.confirmHeading}>Check your email</Text>
+          <Text style={styles.confirmBody}>
+            We sent a confirmation link to{' '}
+            <Text style={styles.confirmEmail}>{email.trim()}</Text>.
+            Tap the link to verify your account, then come back and sign in.
+          </Text>
+          <Pressable
+            style={styles.primaryButton}
+            onPress={() => router.replace('/auth/sign-in')}
+          >
+            <Text style={styles.primaryButtonText}>Go to Sign In</Text>
+          </Pressable>
+          <Pressable
+            style={styles.resendBtn}
+            onPress={async () => {
+              await supabase.auth.resend({ type: 'signup', email: email.trim() });
+            }}
+          >
+            <Text style={styles.resendText}>Resend confirmation email</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -215,5 +253,40 @@ const styles = StyleSheet.create({
   footerLinkBold: {
     color: '#e2507a',
     fontWeight: '600',
+  },
+  confirmContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 20,
+  },
+  confirmIcon: {
+    fontSize: 52,
+    color: '#edd5a0',
+  },
+  confirmHeading: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#FAF7F2',
+    textAlign: 'center',
+  },
+  confirmBody: {
+    fontSize: 15,
+    color: '#c49fd5',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  confirmEmail: {
+    color: '#FAF7F2',
+    fontWeight: '600',
+  },
+  resendBtn: {
+    paddingVertical: 10,
+  },
+  resendText: {
+    fontSize: 14,
+    color: '#e2507a',
+    fontWeight: '500',
   },
 });
