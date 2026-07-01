@@ -11,7 +11,7 @@ async function getOnboardingResumeRoute(userId: string): Promise<string> {
     .from('app_users')
     .select('is_18_confirmed, terms_accepted_at, username, display_name, onboarding_status, connection_style_complete')
     .eq('id', userId)
-    .single();
+    .maybeSingle();
 
   if (!user) return '/onboarding/age-consent';
   if (user.onboarding_status === 'complete') return '/(tabs)/nest';
@@ -26,26 +26,23 @@ async function getOnboardingResumeRoute(userId: string): Promise<string> {
     .from('profiles')
     .select('id')
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
   if (!profile) return '/onboarding/profile-setup';
 
-  // Check privacy preferences (we consider it done if open_to_introductions exists)
+  // Check privacy_settings row — created by privacy-preferences screen
   const { data: privData } = await supabase
-    .from('profiles')
-    .select('open_to_introductions')
+    .from('privacy_settings')
+    .select('id')
     .eq('user_id', userId)
-    .single();
-  // privacy-preferences writes open_to_introductions; if null the step hasn't been saved
-  if (privData?.open_to_introductions === null || privData?.open_to_introductions === undefined) {
-    return '/onboarding/privacy-preferences';
-  }
+    .maybeSingle();
+  if (!privData) return '/onboarding/privacy-preferences';
 
   // Check dating_preferences row
   const { data: dating } = await supabase
     .from('dating_preferences')
     .select('id')
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
   if (!dating) return '/onboarding/dating-preferences';
 
   // Last step before complete
@@ -80,3 +77,4 @@ export default function Index() {
     </View>
   );
 }
+
