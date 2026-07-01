@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
+import { router } from 'expo-router';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from '../src/lib/supabase';
 import { useAuthStore } from '../src/store/authStore';
 import { Theme } from '../src/constants/colors';
+import { registerForPushNotifications, setupNotificationListeners, clearBadge } from '../src/lib/notifications';
 
 export default function RootLayout() {
   const { setAppUser, setLoading } = useAuthStore();
@@ -30,6 +32,9 @@ export default function RootLayout() {
           }
           // data may be null for new OAuth users — that is expected, allow onboarding to proceed
           setAppUser(data ?? null);
+          if (data?.id) {
+            registerForPushNotifications(data.id).catch(console.error);
+          }
         }
       } catch (err) {
         console.error('[Auth] Unexpected bootstrap error:', err);
@@ -67,7 +72,20 @@ export default function RootLayout() {
       }
     );
 
-    return () => subscription.unsubscribe();
+    // Handle notification taps — route to relevant screen
+    const cleanupNotifications = setupNotificationListeners((data) => {
+      clearBadge();
+      if (data?.type === 'introduction' && data?.intro_id) {
+        router.push(`/introduce/${data.intro_id}`);
+      } else if (data?.type === 'message' && data?.thread_id) {
+        router.push(`/conversation/${data.thread_id}`);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      cleanupNotifications();
+    };
   }, []);
 
   return (
